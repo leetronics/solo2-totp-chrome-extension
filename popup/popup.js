@@ -608,20 +608,56 @@ async function handleScanPageForQR() {
     const scanBtn = document.getElementById('scanQrBtn');
     const resultsDiv = document.getElementById('qrResults');
     const resultsList = document.getElementById('qrResultsList');
-    
+
     scanBtn.textContent = '🔍 Scanning...';
     scanBtn.disabled = true;
-    
+
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tab) {
             showMessage('No active tab', 'error');
             return;
         }
-        
-        const response = await chrome.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
+
+        // Check if this is a valid page for content scripts
+        if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('file://'))) {
+            showMessage('Cannot scan on this page type. Please navigate to a website.', 'error');
+            return;
+        }
+
+        // Try to send message to content script, with retry logic
+        let response = null;
+        let retries = 3;
+
+        while (retries > 0) {
+            try {
+                response = await chrome.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
+                break; // Success, exit retry loop
+            } catch (error) {
+                if (error.message && error.message.includes('Receiving end does not exist')) {
+                    // Content script not loaded yet, try to inject it
+                    try {
+                        await chrome.scripting.executeScript({
+                            target: { tabId: tab.id },
+                            files: ['content/content.js']
+                        });
+                        // Wait a moment for script to initialize
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        retries--;
+                        if (retries === 0) {
+                            throw new Error('Content script could not be loaded');
+                        }
+                    } catch (injectionError) {
+                        throw new Error('Cannot access this page. Extension may not have permission.');
+                    }
+                } else {
+                    throw error;
+                }
+            }
+        }
+
         foundQRCodes = response?.results || [];
-        
+
         if (foundQRCodes.length === 0) {
             showMessage('No QR codes found on this page', 'info');
             resultsDiv.style.display = 'none';
@@ -645,14 +681,14 @@ async function handleScanPageForQR() {
                     </div>
                 </div>
             `).join('');
-            
+
             // Add click handlers
             resultsList.querySelectorAll('.qr-result-item').forEach(item => {
                 item.addEventListener('click', () => {
                     const index = parseInt(item.dataset.index);
                     const qr = foundQRCodes[index];
                     const parsed = parseOTPAuthURL(qr.url);
-                    
+
                     if (parsed) {
                         document.getElementById('quickCredName').value = parsed.label || parsed.issuer || '';
                         document.getElementById('quickCredSecret').value = parsed.secret || '';
@@ -661,12 +697,17 @@ async function handleScanPageForQR() {
                     }
                 });
             });
-            
+
             resultsDiv.style.display = 'block';
             showMessage(`Found ${foundQRCodes.length} QR code(s)`, 'success');
         }
     } catch (error) {
-        showMessage('Failed to scan page: ' + error.message, 'error');
+        console.error('QR scan error:', error);
+        if (error.message && error.message.includes('Receiving end does not exist')) {
+            showMessage('Cannot scan this page. Please try refreshing the page first.', 'error');
+        } else {
+            showMessage('Failed to scan page: ' + error.message, 'error');
+        }
     } finally {
         scanBtn.textContent = '🔍 Find QR on Page';
         scanBtn.disabled = false;

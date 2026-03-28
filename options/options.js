@@ -375,33 +375,49 @@ function clearAddForm() {
 
 async function handleScanQR() {
     const scanBtn = document.getElementById('scanQrBtn');
-    
+
     scanBtn.textContent = 'Scanning...';
     scanBtn.disabled = true;
-    
+
     try {
         // Query all tabs to find QR codes
         const tabs = await chrome.tabs.query({});
         let allResults = [];
-        
+        let scannedTabs = 0;
+        let accessibleTabs = 0;
+
         for (const tab of tabs) {
+            // Skip invalid pages
+            if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://'))) {
+                continue;
+            }
+            accessibleTabs++;
+
             try {
                 const response = await chrome.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
                 if (response?.results?.length > 0) {
-                    allResults = allResults.concat(response.results.map(r => ({ ...r, tabTitle: tab.title })));
+                    allResults = allResults.concat(response.results.map(r => ({ ...r, tabTitle: tab.title, tabId: tab.id })));
                 }
+                scannedTabs++;
             } catch (e) {
-                // Tab may not have content script, skip
+                // Tab may not have content script or be accessible, skip
                 continue;
             }
         }
-        
+
         if (allResults.length === 0) {
-            showMessage('No QR codes found on any open page', 'info');
+            if (accessibleTabs === 0) {
+                showMessage('No accessible tabs found. Please open a website first.', 'info');
+            } else if (scannedTabs === 0) {
+                showMessage('Could not scan any tabs. Try refreshing the pages first.', 'info');
+            } else {
+                showMessage('No QR codes found on any open page', 'info');
+            }
         } else {
             showQRCodeSelector(allResults);
         }
     } catch (error) {
+        console.error('Scan error:', error);
         showMessage('Failed to scan: ' + error.message, 'error');
     } finally {
         scanBtn.textContent = '🔍 Find QR on Page';

@@ -40,7 +40,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["lib/*", "connection/*", "icons/*", "test.html"],
+      "resources": ["lib/*", "connection/*", "icons/*", "test.html", "content/content.js"],
       "matches": ["<all_urls>"]
     }
   ]
