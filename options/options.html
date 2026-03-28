@@ -407,8 +407,8 @@
         <div class="card">
             <div class="status-bar">
                 <div class="status-indicator" id="statusIndicator"></div>
-                <span id="statusText">No device connected</span>
-                <button class="btn" id="connectBtn" style="margin-left: auto;">Connect Device</button>
+                <span id="statusText">Not connected to SoloKeys GUI</span>
+                <button class="btn" id="connectBtn" style="margin-left: auto;">Connect to SoloKeys GUI</button>
             </div>
             <div id="messageArea"></div>
         </div>
@@ -428,7 +428,8 @@
                 <div id="credentialList" class="credential-list">
                     <div class="empty-state">
                         <div class="empty-state-icon">🔑</div>
-                        <p>No credentials found on device</p>
+                        <p>No credentials found</p>
+                        <button class="btn" onclick="switchTab('add')" style="margin-top: 16px;">Add Your First Credential</button>
                     </div>
                 </div>
             </div>

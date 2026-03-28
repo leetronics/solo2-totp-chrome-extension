@@ -420,8 +420,8 @@
         
         <!-- Device Connection -->
         <div class="device-section" id="deviceSection">
-            <p id="deviceStatus">No device connected</p>
-            <button class="btn" id="connectBtn">Connect SoloKeys</button>
+            <p id="deviceStatus">Not connected to SoloKeys GUI</p>
+            <button class="btn" id="connectBtn">Connect to SoloKeys GUI</button>
         </div>
         
         <!-- OTP Display -->
@@ -469,7 +469,7 @@
     <div class="pin-modal hidden" id="pinModal">
         <div class="pin-modal-content">
             <h3>🔒 Enter PIN</h3>
-            <p style="font-size: 13px; color: #666; margin-bottom: 12px;">Your SoloKeys device requires PIN verification</p>
+            <p style="font-size: 13px; color: #666; margin-bottom: 12px;">PIN verification required</p>
             <input type="password" class="pin-input" id="pinInput" maxlength="8" placeholder="••••••••">
             <button class="btn" id="pinSubmitBtn">Verify PIN</button>
             <button class="btn btn-secondary" id="pinCancelBtn" style="margin-top: 8px;">Cancel</button>
@@ -480,7 +480,7 @@
     <div class="touch-overlay hidden" id="touchOverlay">
         <div class="touch-icon">👆</div>
         <h2>Touch Required</h2>
-        <p>Please press the button on your SoloKeys device</p>
+        <p>Please press the button on your SoloKeys</p>
     </div>
     
     <script src="popup.js" type="module"></script>

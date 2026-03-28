@@ -86,13 +86,13 @@ function updateConnectionStatus(connected, count) {
 
     if (connected) {
         indicator.classList.add('connected');
-        statusText.textContent = `Connected • ${count} credentials`;
-        connectBtn.textContent = 'Reconnect Device';
+        statusText.textContent = `Connected to SoloKeys GUI • ${count} credentials`;
+        connectBtn.textContent = 'Reconnect';
         isConnected = true;
     } else {
         indicator.classList.remove('connected');
-        statusText.textContent = 'No device connected';
-        connectBtn.textContent = 'Connect SoloKeys';
+        statusText.textContent = 'Not connected to SoloKeys GUI';
+        connectBtn.textContent = 'Connect to SoloKeys GUI';
         isConnected = false;
     }
 }
@@ -137,7 +137,7 @@ async function connectToDevice() {
 
     updateConnectionStatus(true, creds.length);
     renderCredentials();
-    showMessage('Connected to SoloKeys!', 'success');
+    showMessage('Connected to SoloKeys GUI!', 'success');
 
     const connectBtn = document.getElementById('connectBtn');
     connectBtn.textContent = 'Reconnect Device';
@@ -148,7 +148,7 @@ async function connectToDevice() {
 // action: 'display' (show in panel) | 'copy' (to clipboard) | 'type' (fill page)
 async function generateOTP(credential, action = 'display') {
     if (!isConnected || !oath) {
-        showMessage('Connect your SoloKeys device to generate a code', 'info');
+        showMessage('Connect to SoloKeys GUI to generate a code', 'info');
         return;
     }
 
@@ -252,14 +252,14 @@ function renderCredentials() {
         list.innerHTML = `
             <div class="empty-state">
                 <div class="empty-state-icon">🔑</div>
-                <p>${isConnected ? 'No credentials on device' : 'Connect device to see credentials'}</p>
+                <p>${isConnected ? 'No credentials found' : 'Connect to SoloKeys GUI to see credentials'}</p>
                 ${isConnected ? '<button class="btn" id="addFirstCredBtn" style="margin-top: 8px;">Add Credential</button>' : ''}
             </div>
         `;
         document.getElementById('addFirstCredBtn')?.addEventListener('click', handleOpenOptions);
     } else {
         const cachedBanner = cached
-            ? '<div class="message info" style="margin:0 0 8px;">Showing cached credentials — connect device to generate codes</div>'
+            ? '<div class="message info" style="margin:0 0 8px;">Showing cached credentials — connect to SoloKeys GUI to generate codes</div>'
             : '';
         list.innerHTML = cachedBanner + credentials.map(cred =>
             createCredentialItem(cred, matchingCredentials.some(m => m.name === cred.name), cached)
@@ -277,7 +277,7 @@ function attachCredentialHandlers(container, credList, cached) {
         el.addEventListener('click', (e) => {
             if (e.target.closest('.btn-row')) return;
             if (cached) {
-                showMessage('Connect your SoloKeys device to generate a code', 'info');
+                showMessage('Connect to SoloKeys GUI to generate a code', 'info');
             } else {
                 generateOTP(cred, 'display');
             }

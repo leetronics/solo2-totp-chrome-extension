@@ -105,13 +105,13 @@ function updateConnectionStatus(connected, count) {
 
     if (connected) {
         indicator.classList.add('connected');
-        statusText.textContent = `Connected • ${count} credential${count !== 1 ? 's' : ''}`;
-        connectBtn.textContent = 'Reconnect Device';
+        statusText.textContent = `Connected to SoloKeys GUI • ${count} credential${count !== 1 ? 's' : ''}`;
+        connectBtn.textContent = 'Reconnect';
         isConnected = true;
     } else {
         indicator.classList.remove('connected');
-        statusText.textContent = 'No device connected';
-        connectBtn.textContent = 'Connect Device';
+        statusText.textContent = 'Not connected to SoloKeys GUI';
+        connectBtn.textContent = 'Connect to SoloKeys GUI';
         isConnected = false;
     }
 }
@@ -148,7 +148,7 @@ async function connectToDevice() {
         isConnected = true;
         updateConnectionStatus(true, credentials.length);
         renderCredentialList();
-        showMessage('Device connected successfully!', 'success');
+        showMessage('Connected to SoloKeys GUI!', 'success');
 
         // Sync state to background
         await chrome.runtime.sendMessage({
@@ -214,7 +214,7 @@ async function deleteCredential(name) {
     if (!confirmed) return;
 
     if (!oath) {
-        showMessage('Not connected to device', 'error');
+        showMessage('Not connected to SoloKeys GUI', 'error');
         return;
     }
 
@@ -276,7 +276,7 @@ async function handleAddCredential() {
     }
 
     if (!oath) {
-        showMessage('Not connected to device', 'error');
+        showMessage('Not connected to SoloKeys GUI', 'error');
         return;
     }
 
@@ -438,7 +438,7 @@ async function handleSetPIN() {
     }
 
     if (!oath) {
-        showMessage('Not connected to device', 'error');
+        showMessage('Not connected to SoloKeys GUI', 'error');
         return;
     }
 
@@ -470,7 +470,7 @@ async function handleChangePIN() {
     }
 
     if (!oath) {
-        showMessage('Not connected to device', 'error');
+        showMessage('Not connected to SoloKeys GUI', 'error');
         return;
     }
 

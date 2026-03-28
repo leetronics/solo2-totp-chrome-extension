@@ -220,11 +220,11 @@ async function generateAndFillOTP(input, credentialName) {
                 input.style.opacity = '';
             }, 500);
         } else if (response.touchRequired) {
-            showNotification('Please touch your SoloKeys device', 'info');
+            showNotification('Please touch your SoloKeys', 'info');
             // Poll for touch
             pollForTouchAndFill(input, credentialName);
         } else if (response.pinRequired) {
-            showNotification('PIN verification required. Open extension popup.', 'warning');
+            showNotification('PIN required. Open the extension popup.', 'warning');
             input.style.opacity = '';
         } else {
             showNotification(response.message || 'Failed to generate OTP', 'error');
