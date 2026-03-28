@@ -82,27 +82,70 @@ function isOTPField(input) {
     const placeholder = (input.placeholder || '').toLowerCase();
     const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
     const autocomplete = (input.getAttribute('autocomplete') || '').toLowerCase();
+    const type = input.type || '';
     
-    // Common OTP field indicators
-    const otpPatterns = [
-        'otp', '2fa', 'mfa', 'totp', 'code', 'token',
-        'verification', 'auth', 'authenticator', 'security'
+    // Explicit OTP markers - highest confidence
+    if (autocomplete.includes('one-time')) {
+        return true;
+    }
+    
+    // Common OTP field indicators - more specific matching
+    const otpSpecificPatterns = [
+        'otp', '2fa', 'mfa', 'totp', 
+        'verification code', 'auth code', 'authenticator code'
     ];
     
-    const isOTP = otpPatterns.some(pattern => 
+    const hasOtpSpecific = otpSpecificPatterns.some(pattern => 
         name.includes(pattern) || 
         id.includes(pattern) || 
         placeholder.includes(pattern) ||
-        ariaLabel.includes(pattern) ||
-        autocomplete.includes('one-time')
+        ariaLabel.includes(pattern)
     );
     
-    // Additional checks
-    const isNumeric = input.type === 'number' || input.inputMode === 'numeric';
-    const maxLength = input.maxLength;
-    const is6Digits = maxLength === 6 || maxLength === 8;
+    // Less reliable patterns - require additional context
+    const otpGeneralPatterns = [
+        'code', 'token', 
+        'verification', 'auth', 'authenticator', 'security'
+    ];
     
-    return isOTP || (isNumeric && is6Digits);
+    const hasOtpGeneral = otpGeneralPatterns.some(pattern => 
+        name.includes(pattern) || 
+        id.includes(pattern) || 
+        placeholder.includes(pattern) ||
+        ariaLabel.includes(pattern)
+    );
+    
+    // Additional checks - must look like an OTP input
+    const isNumericInput = type === 'number' || input.inputMode === 'numeric' || 
+                          (input.getAttribute('pattern') && 
+                           input.getAttribute('pattern').matches(/^[\d]{6,8}$/));
+    const maxLength = input.maxLength;
+    const isCorrectLength = maxLength === 6 || maxLength === 8;
+    
+    // Input characteristics typical for OTP fields
+    const isShortInput = maxLength && maxLength <= 8;
+    const hasTypicalSize = (input.clientWidth && input.clientWidth < 150) || 
+                          (width && width < 150);
+    
+    // High confidence: specific OTP label + numeric + correct length
+    if (hasOtpSpecific && isNumericInput && isCorrectLength) {
+        return true;
+    }
+    
+    // Medium confidence: general OTP label + multiple OTP indicators + correct length
+    if (hasOtpGeneral && isNumericInput && isCorrectLength) {
+        // Check for multiple OTP indicators to reduce false positives
+        const otpIndicatorCount = otpSpecificPatterns.filter(p => 
+            name.includes(p) || id.includes(p) || placeholder.includes(p) || ariaLabel.includes(p)
+        ).length;
+        
+        return otpIndicatorCount >= 2;
+    }
+    
+    // Low confidence: only use if very specific context
+    // Don't rely on length/numeric alone as it catches too many fields
+    
+    return false;
 }
 
 function enhanceOTPField(input) {
