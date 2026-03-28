@@ -100,30 +100,43 @@ function updateConnectionStatus(connected, count) {
     const indicator = document.getElementById('statusIndicator');
     const statusText = document.getElementById('statusText');
     const connectBtn = document.getElementById('connectBtn');
+    const helpText = document.getElementById('connectHelp');
 
     if (connected) {
         indicator.classList.add('connected');
         statusText.textContent = `Connected to SoloKeys GUI • ${count} credential${count !== 1 ? 's' : ''}`;
-        connectBtn.textContent = 'Reconnect';
+        connectBtn.style.display = 'none';
+        if (helpText) helpText.style.display = 'none';
         isConnected = true;
     } else {
         indicator.classList.remove('connected');
         statusText.textContent = 'Not connected to SoloKeys GUI';
         connectBtn.textContent = 'Connect to SoloKeys GUI';
+        connectBtn.style.display = 'block';
         isConnected = false;
     }
 }
 
 async function handleConnect() {
     const connectBtn = document.getElementById('connectBtn');
+    const helpText = document.getElementById('connectHelp');
+    
     connectBtn.textContent = 'Connecting...';
     connectBtn.disabled = true;
+    if (helpText) {
+        helpText.style.display = 'block';
+        helpText.textContent = 'Check SoloKeys GUI for confirmation dialog...';
+    }
 
     try {
         await connectToDevice();
     } catch (error) {
         console.error('Connection error:', error);
         showMessage('Connection failed: ' + error.message, 'error');
+        if (helpText) {
+            helpText.style.display = 'block';
+            helpText.textContent = 'Click to try again';
+        }
     } finally {
         connectBtn.disabled = false;
     }
@@ -132,7 +145,7 @@ async function handleConnect() {
 async function connectToDevice() {
     try {
         device = new NativeTransport();
-        await device.connect();
+        await device.connect(30000); // 30 second timeout for user confirmation
 
         oath = new OATHProtocol(device);
 
@@ -142,6 +155,27 @@ async function connectToDevice() {
         } catch (e) {
             console.warn('Could not list credentials:', e);
         }
+
+        isConnected = true;
+        updateConnectionStatus(true, credentials.length);
+        renderCredentialList();
+        showMessage('Connected to SoloKeys GUI!', 'success');
+
+        // Sync state to background
+        await chrome.runtime.sendMessage({
+            action: 'updateDeviceState',
+            connected: true,
+            credentials,
+            pinVerified: oath.pinVerified
+        });
+    } catch (error) {
+        console.error('Failed to connect to SoloKeys GUI:', error);
+        showMessage('Failed to connect: ' + error.message, 'error');
+        const connectBtn = document.getElementById('connectBtn');
+        connectBtn.textContent = 'Connect to SoloKeys GUI';
+        isConnected = false;
+    }
+}
 
         isConnected = true;
         updateConnectionStatus(true, credentials.length);

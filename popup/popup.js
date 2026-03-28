@@ -116,32 +116,41 @@ function updateConnectionStatus(connected, count, isCached = false) {
     if (connected) {
         indicator.classList.add('connected');
         statusText.textContent = `Connected to SoloKeys GUI • ${count} credentials`;
-        connectBtn.textContent = 'Reconnect';
+        connectBtn.style.display = 'none';
         isConnected = true;
     } else if (isCached) {
         indicator.classList.remove('connected');
         statusText.textContent = `Cached • ${count} credentials`;
         connectBtn.textContent = 'Connect to SoloKeys GUI';
+        connectBtn.style.display = 'block';
         isConnected = false;
     } else {
         indicator.classList.remove('connected');
         statusText.textContent = 'Not connected to SoloKeys GUI';
         connectBtn.textContent = 'Connect to SoloKeys GUI';
+        connectBtn.style.display = 'block';
         isConnected = false;
     }
 }
 
 async function handleConnect() {
     const connectBtn = document.getElementById('connectBtn');
+    const helpText = document.getElementById('connectHelp');
+    
     connectBtn.textContent = 'Connecting...';
     connectBtn.disabled = true;
+    helpText.style.display = 'block';
+    helpText.textContent = 'Check SoloKeys GUI for confirmation dialog...';
 
     try {
         await connectToDevice(false); // explicit user action, not silent
+        helpText.style.display = 'none';
     } catch (error) {
         console.error('Connection error:', error);
         showMessage('Connection failed: ' + error.message, 'error');
         updateConnectionStatus(false, credentials.length, isCachedWhileOffline());
+        helpText.style.display = 'block';
+        helpText.textContent = 'Click to try again';
     } finally {
         connectBtn.disabled = false;
     }
@@ -149,7 +158,7 @@ async function handleConnect() {
 
 async function connectToDevice(silent = false) {
     device = new NativeTransport();
-    await device.connect();
+    await device.connect(30000); // 30 second timeout for user confirmation
 
     oath = new OATHProtocol(device);
 
@@ -176,10 +185,6 @@ async function connectToDevice(silent = false) {
     if (!silent) {
         showMessage('Connected to SoloKeys GUI!', 'success');
     }
-
-    const connectBtn = document.getElementById('connectBtn');
-    connectBtn.textContent = 'Reconnect';
-    connectBtn.disabled = false;
 }
 
 // Generate OTP then execute the requested action.
