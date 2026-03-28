@@ -343,57 +343,6 @@
         .scan-btn {
             white-space: nowrap;
         }
-        
-        #qrScanner {
-            width: 100%;
-            max-width: 400px;
-            margin: 20px auto;
-            display: none;
-        }
-        
-        #qrScanner video {
-            width: 100%;
-            border-radius: 8px;
-        }
-        
-        .scanner-overlay {
-            position: relative;
-            display: inline-block;
-        }
-        
-        .scanner-frame {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 200px;
-            height: 200px;
-            border: 2px solid #667eea;
-            border-radius: 8px;
-            box-shadow: 0 0 0 1000px rgba(0,0,0,0.5);
-        }
-        
-        .scanner-frame::before,
-        .scanner-frame::after {
-            content: '';
-            position: absolute;
-            width: 20px;
-            height: 20px;
-            border-color: #667eea;
-            border-style: solid;
-        }
-        
-        .scanner-frame::before {
-            top: -2px;
-            left: -2px;
-            border-width: 4px 0 0 4px;
-        }
-        
-        .scanner-frame::after {
-            bottom: -2px;
-            right: -2px;
-            border-width: 0 4px 4px 0;
-        }
     </style>
 </head>
 <body>
@@ -478,15 +427,9 @@
                     <label>Secret Key</label>
                     <div class="secret-input-group">
                         <input type="text" id="credSecret" placeholder="Base32 encoded secret (e.g., JBSWY3DPEHPK3PXP)">
-                        <button class="btn btn-secondary scan-btn" id="scanQrBtn">📷 Scan QR</button>
+                        <button class="btn btn-secondary scan-btn" id="scanQrBtn">🔍 Find QR on Page</button>
                     </div>
-                    <p class="help-text">Enter the secret key or scan a QR code from your service's 2FA setup</p>
-                </div>
-                
-                <!-- QR Scanner -->
-                <div id="qrScanner" class="scanner-overlay">
-                    <video id="qrVideo"></video>
-                    <div class="scanner-frame"></div>
+                    <p class="help-text">Enter the secret key or find a QR code on any open page</p>
                 </div>
                 
                 <div class="checkbox-group">

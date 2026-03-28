@@ -401,6 +401,45 @@ function observeDOM() {
     });
 }
 
+async function scanImagesForQR() {
+    const images = document.querySelectorAll('img');
+    const results = [];
+    
+    for (const img of images) {
+        try {
+            // Skip very small images (likely icons)
+            if (img.width < 50 || img.height < 50) continue;
+            
+            // Create canvas to draw image
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = img.naturalWidth || img.width;
+            canvas.height = img.naturalHeight || img.height;
+            
+            // Draw image to canvas
+            ctx.drawImage(img, 0, 0);
+            
+            // Get image data
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            // Try to decode QR
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+            
+            if (code && code.data.startsWith('otpauth://')) {
+                results.push({
+                    url: code.data,
+                    imgSrc: img.src
+                });
+            }
+        } catch (error) {
+            // Skip images that can't be processed
+            continue;
+        }
+    }
+    
+    return results;
+}
+
 function handleMessage(request, sender, sendResponse) {
     switch (request.action) {
         case 'matchingCredentials':
@@ -434,6 +473,12 @@ function handleMessage(request, sender, sendResponse) {
             sendResponse({ success: filled });
             break;
         }
+        
+        case 'scanPageForQR':
+            scanImagesForQR().then(results => {
+                sendResponse({ results });
+            });
+            return true; // Keep channel open for async
 
         default:
             sendResponse({});

@@ -18,8 +18,7 @@ let pendingCredentialName = null;
 let pendingAction = 'display'; // 'display' | 'copy' | 'type'
 let isSyncing = false;
 let currentHostname = '';
-let videoStream = null;
-let qrScanning = false;
+let foundQRCodes = [];
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
@@ -43,8 +42,7 @@ function setupEventListeners() {
     // Quick add credential listeners
     document.getElementById('toggleQuickAddBtn')?.addEventListener('click', toggleQuickAdd);
     document.getElementById('addQuickCredBtn')?.addEventListener('click', handleQuickAddCredential);
-    document.getElementById('scanQrBtn')?.addEventListener('click', handleScanQR);
-    document.getElementById('stopScanBtn')?.addEventListener('click', stopQRScanner);
+    document.getElementById('scanQrBtn')?.addEventListener('click', handleScanPageForQR);
 }
 
 async function loadStateFromBackground() {
@@ -478,6 +476,7 @@ function showMessage(text, type) {
 function toggleQuickAdd() {
     const form = document.getElementById('quickAddForm');
     const btn = document.getElementById('toggleQuickAddBtn');
+    const qrResults = document.getElementById('qrResults');
     
     if (form.classList.contains('hidden')) {
         form.classList.remove('hidden');
@@ -496,7 +495,7 @@ function toggleQuickAdd() {
     } else {
         form.classList.add('hidden');
         btn.textContent = '+ Add Credential for This Site';
-        stopQRScanner();
+        qrResults.style.display = 'none';
     }
 }
 
@@ -576,65 +575,74 @@ async function loadCredentialsFromDevice() {
     }
 }
 
-// QR Code Scanning
-async function handleScanQR() {
-    const video = document.getElementById('qrVideo');
-    const scanner = document.getElementById('qrScanner');
+// QR Code Scanning from Page
+async function handleScanPageForQR() {
+    const scanBtn = document.getElementById('scanQrBtn');
+    const resultsDiv = document.getElementById('qrResults');
+    const resultsList = document.getElementById('qrResultsList');
+    
+    scanBtn.textContent = '🔍 Scanning...';
+    scanBtn.disabled = true;
     
     try {
-        videoStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment' }
-        });
-        video.srcObject = videoStream;
-        video.play();
-        
-        scanner.style.display = 'block';
-        qrScanning = true;
-        
-        scanQRFrame();
-    } catch (error) {
-        showMessage('Failed to access camera: ' + error.message, 'error');
-    }
-}
-
-function stopQRScanner() {
-    qrScanning = false;
-    if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
-        videoStream = null;
-    }
-    document.getElementById('qrScanner').style.display = 'none';
-}
-
-function scanQRFrame() {
-    if (!qrScanning) return;
-    
-    const video = document.getElementById('qrVideo');
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-        
-        if (code) {
-            const parsed = parseOTPAuthURL(code.data);
-            if (parsed) {
-                document.getElementById('quickCredName').value = parsed.label || parsed.issuer || '';
-                document.getElementById('quickCredSecret').value = parsed.secret || '';
-                
-                stopQRScanner();
-                showMessage('QR code scanned!', 'success');
-                return;
-            }
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab) {
+            showMessage('No active tab', 'error');
+            return;
         }
+        
+        const response = await chrome.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
+        foundQRCodes = response?.results || [];
+        
+        if (foundQRCodes.length === 0) {
+            showMessage('No QR codes found on this page', 'info');
+            resultsDiv.style.display = 'none';
+        } else {
+            // Display found QR codes
+            resultsList.innerHTML = foundQRCodes.map((qr, index) => `
+                <div class="qr-result-item" data-index="${index}" style="
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 8px;
+                    background: #f5f5f5;
+                    border-radius: 4px;
+                    margin-bottom: 4px;
+                    cursor: pointer;
+                    font-size: 12px;
+                ">
+                    <img src="${qr.imgSrc}" style="width: 40px; height: 40px; object-fit: contain; border-radius: 2px;">
+                    <div style="flex: 1; overflow: hidden;">
+                        <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${qr.url.substring(0, 50)}...</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            // Add click handlers
+            resultsList.querySelectorAll('.qr-result-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const index = parseInt(item.dataset.index);
+                    const qr = foundQRCodes[index];
+                    const parsed = parseOTPAuthURL(qr.url);
+                    
+                    if (parsed) {
+                        document.getElementById('quickCredName').value = parsed.label || parsed.issuer || '';
+                        document.getElementById('quickCredSecret').value = parsed.secret || '';
+                        resultsDiv.style.display = 'none';
+                        showMessage('QR code selected!', 'success');
+                    }
+                });
+            });
+            
+            resultsDiv.style.display = 'block';
+            showMessage(`Found ${foundQRCodes.length} QR code(s)`, 'success');
+        }
+    } catch (error) {
+        showMessage('Failed to scan page: ' + error.message, 'error');
+    } finally {
+        scanBtn.textContent = '🔍 Find QR on Page';
+        scanBtn.disabled = false;
     }
-    
-    requestAnimationFrame(scanQRFrame);
 }
 
 function parseOTPAuthURL(url) {

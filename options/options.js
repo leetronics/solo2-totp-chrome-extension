@@ -6,8 +6,6 @@ import OATHProtocol from '../lib/oath.js';
 
 let isConnected = false;
 let credentials = [];
-let videoStream = null;
-let qrScanning = false;
 let device = null;
 let oath = null;
 
@@ -339,71 +337,124 @@ function clearAddForm() {
     document.getElementById('credDigits').value = '6';
     document.getElementById('credTouch').checked = false;
     document.getElementById('credPin').checked = false;
-    stopQRScanner();
 }
 
 async function handleScanQR() {
-    const scanner = document.getElementById('qrScanner');
-    const video = document.getElementById('qrVideo');
-
+    const scanBtn = document.getElementById('scanQrBtn');
+    
+    scanBtn.textContent = 'Scanning...';
+    scanBtn.disabled = true;
+    
     try {
-        videoStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment' }
-        });
-        video.srcObject = videoStream;
-        video.play();
-
-        scanner.style.display = 'block';
-        qrScanning = true;
-        document.getElementById('scanQrBtn').textContent = 'Stop Scanning';
-
-        scanQRFrame();
+        // Query all tabs to find QR codes
+        const tabs = await chrome.tabs.query({});
+        let allResults = [];
+        
+        for (const tab of tabs) {
+            try {
+                const response = await chrome.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
+                if (response?.results?.length > 0) {
+                    allResults = allResults.concat(response.results.map(r => ({ ...r, tabTitle: tab.title })));
+                }
+            } catch (e) {
+                // Tab may not have content script, skip
+                continue;
+            }
+        }
+        
+        if (allResults.length === 0) {
+            showMessage('No QR codes found on any open page', 'info');
+        } else {
+            showQRCodeSelector(allResults);
+        }
     } catch (error) {
-        showMessage('Failed to access camera: ' + error.message, 'error');
+        showMessage('Failed to scan: ' + error.message, 'error');
+    } finally {
+        scanBtn.textContent = '🔍 Find QR on Page';
+        scanBtn.disabled = false;
     }
 }
 
-function stopQRScanner() {
-    qrScanning = false;
-    if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
-        videoStream = null;
-    }
-    document.getElementById('qrScanner').style.display = 'none';
-    document.getElementById('scanQrBtn').textContent = '📷 Scan QR';
-}
-
-function scanQRFrame() {
-    if (!qrScanning) return;
-
-    const video = document.getElementById('qrVideo');
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-        if (code) {
-            const parsed = parseOTPAuthURL(code.data);
+function showQRCodeSelector(results) {
+    // Create modal for QR code selection
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+    `;
+    
+    modal.innerHTML = `
+        <div style="background: white; padding: 24px; border-radius: 12px; max-width: 500px; max-height: 80vh; overflow-y: auto;">
+            <h3 style="margin-bottom: 16px;">Select QR Code (${results.length} found)</h3>
+            <div id="qrSelectorList"></div>
+            <button class="btn btn-secondary" id="closeQrSelector" style="width: 100%; margin-top: 16px;">Cancel</button>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    const list = modal.querySelector('#qrSelectorList');
+    list.innerHTML = results.map((qr, index) => `
+        <div class="qr-select-item" data-index="${index}" style="
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        ">
+            <img src="${qr.imgSrc}" style="width: 60px; height: 60px; object-fit: contain; border-radius: 4px; border: 1px solid #ddd;">
+            <div style="flex: 1; overflow: hidden;">
+                <div style="font-weight: 500; margin-bottom: 4px;">${qr.tabTitle || 'Unknown page'}</div>
+                <div style="font-size: 12px; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${qr.url.substring(0, 60)}...</div>
+            </div>
+        </div>
+    `).join('');
+    
+    // Add click handlers
+    list.querySelectorAll('.qr-select-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const index = parseInt(item.dataset.index);
+            const qr = results[index];
+            const parsed = parseOTPAuthURL(qr.url);
+            
             if (parsed) {
                 document.getElementById('credName').value = parsed.label || parsed.issuer || '';
                 document.getElementById('credSecret').value = parsed.secret || '';
                 document.getElementById('credAlgorithm').value = parsed.algorithm || 'SHA1';
                 document.getElementById('credDigits').value = parsed.digits || '6';
-
-                stopQRScanner();
-                showMessage('QR code scanned successfully!', 'success');
-                return;
+                showMessage('QR code selected!', 'success');
             }
-        }
-    }
-
-    requestAnimationFrame(scanQRFrame);
+            
+            modal.remove();
+        });
+        
+        item.addEventListener('mouseenter', () => {
+            item.style.background = '#e3f2fd';
+        });
+        item.addEventListener('mouseleave', () => {
+            item.style.background = '#f8f9fa';
+        });
+    });
+    
+    modal.querySelector('#closeQrSelector').addEventListener('click', () => {
+        modal.remove();
+    });
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
 }
 
 function parseOTPAuthURL(url) {

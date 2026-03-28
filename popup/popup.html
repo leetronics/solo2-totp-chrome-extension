@@ -454,12 +454,12 @@
                     <input type="text" id="quickCredSecret" placeholder="Secret key (Base32)" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 8px;">
                 </div>
                 <div style="display: flex; gap: 8px;">
-                    <button class="btn btn-small" id="scanQrBtn" style="flex: 1;">📷 Scan QR</button>
+                    <button class="btn btn-small" id="scanQrBtn" style="flex: 1;">🔍 Find QR on Page</button>
                     <button class="btn btn-small" id="addQuickCredBtn" style="flex: 1;">Add</button>
                 </div>
-                <div id="qrScanner" style="display: none; margin-top: 8px;">
-                    <video id="qrVideo" style="width: 100%; border-radius: 4px;"></video>
-                    <button class="btn btn-secondary btn-small" id="stopScanBtn" style="width: 100%; margin-top: 8px;">Stop Scanning</button>
+                <div id="qrResults" style="display: none; margin-top: 8px; max-height: 150px; overflow-y: auto;">
+                    <p style="font-size: 11px; color: #666; margin-bottom: 4px;">Click a QR code to use it:</p>
+                    <div id="qrResultsList"></div>
                 </div>
             </div>
         </div>
