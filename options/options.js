@@ -192,7 +192,7 @@ function renderCredentialList() {
     }
 
     list.innerHTML = credentials.map(cred => `
-        <div class="credential-card">
+        <div class="credential-card" data-credential-name="${escapeHtml(cred.name)}">
             <div class="credential-info">
                 <h3>${escapeHtml(cred.name)}</h3>
                 <p>${cred.type} • ${cred.algorithm} • ${cred.digits} digits</p>
@@ -201,9 +201,18 @@ function renderCredentialList() {
                     ${cred.pinEncrypted ? '<span class="badge pin">PIN Protected</span>' : ''}
                 </div>
             </div>
-            <button class="btn btn-danger" onclick="deleteCredential('${cred.name.replace(/'/g, "\\'")}')">Delete</button>
+            <button class="btn btn-danger delete-cred-btn">Delete</button>
         </div>
     `).join('');
+    
+    // Attach delete handlers using event delegation
+    list.querySelectorAll('.delete-cred-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const card = e.target.closest('.credential-card');
+            const name = card.dataset.credentialName;
+            deleteCredential(name);
+        });
+    });
 }
 
 async function deleteCredential(name) {
@@ -553,6 +562,5 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Expose deleteCredential globally for inline onclick handlers
-window.deleteCredential = deleteCredential;
+// Expose switchTab globally for inline onclick handlers
 window.switchTab = switchTab;
