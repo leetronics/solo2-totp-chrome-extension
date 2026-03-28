@@ -17,6 +17,9 @@ let isConnected = false;
 let pendingCredentialName = null;
 let pendingAction = 'display'; // 'display' | 'copy' | 'type'
 let isSyncing = false;
+let currentHostname = '';
+let videoStream = null;
+let qrScanning = false;
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
@@ -36,6 +39,12 @@ function setupEventListeners() {
     document.getElementById('pinInput').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') handlePinSubmit();
     });
+    
+    // Quick add credential listeners
+    document.getElementById('toggleQuickAddBtn')?.addEventListener('click', toggleQuickAdd);
+    document.getElementById('addQuickCredBtn')?.addEventListener('click', handleQuickAddCredential);
+    document.getElementById('scanQrBtn')?.addEventListener('click', handleScanQR);
+    document.getElementById('stopScanBtn')?.addEventListener('click', stopQRScanner);
 }
 
 async function loadStateFromBackground() {
@@ -88,10 +97,10 @@ async function checkCurrentSite() {
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tab && tab.url) {
-            const hostname = new URL(tab.url).hostname;
+            currentHostname = new URL(tab.url).hostname;
             const response = await chrome.runtime.sendMessage({
                 action: 'checkSiteMatch',
-                hostname
+                hostname: currentHostname
             });
             matchingCredentials = response.credentials || [];
             renderCredentials();
@@ -463,6 +472,224 @@ function showMessage(text, type) {
     area.innerHTML = '';
     area.appendChild(msg);
     setTimeout(() => { msg.remove(); }, 5000);
+}
+
+// Quick Add Credential Functions
+function toggleQuickAdd() {
+    const form = document.getElementById('quickAddForm');
+    const btn = document.getElementById('toggleQuickAddBtn');
+    
+    if (form.classList.contains('hidden')) {
+        form.classList.remove('hidden');
+        btn.textContent = '− Cancel';
+        
+        // Pre-fill credential name with current site
+        const nameInput = document.getElementById('quickCredName');
+        if (currentHostname && !nameInput.value) {
+            // Extract domain name without TLD
+            const parts = currentHostname.split('.');
+            const siteName = parts.length > 1 ? parts[parts.length - 2] : parts[0];
+            nameInput.value = siteName.charAt(0).toUpperCase() + siteName.slice(1);
+            nameInput.focus();
+            nameInput.select();
+        }
+    } else {
+        form.classList.add('hidden');
+        btn.textContent = '+ Add Credential for This Site';
+        stopQRScanner();
+    }
+}
+
+async function handleQuickAddCredential() {
+    const nameInput = document.getElementById('quickCredName');
+    const secretInput = document.getElementById('quickCredSecret');
+    
+    const name = nameInput.value.trim();
+    const secret = secretInput.value.trim();
+    
+    if (!name) {
+        showMessage('Please enter a credential name', 'error');
+        return;
+    }
+    
+    if (!secret) {
+        showMessage('Please enter or scan a secret key', 'error');
+        return;
+    }
+    
+    // Ensure we're connected
+    if (!isConnected || !oath) {
+        try {
+            showMessage('Connecting to SoloKeys GUI...', 'info');
+            await connectToDevice();
+        } catch (error) {
+            showMessage('Please connect to SoloKeys GUI first', 'error');
+            return;
+        }
+    }
+    
+    // Decode secret
+    let secretBytes;
+    try {
+        secretBytes = base32Decode(secret);
+    } catch (error) {
+        showMessage('Invalid secret key format. Must be Base32 encoded.', 'error');
+        return;
+    }
+    
+    try {
+        const result = await oath.addCredential(name, secretBytes, 'TOTP', 'SHA1', 6, {});
+        if (result.success) {
+            showMessage('Credential added successfully!', 'success');
+            nameInput.value = '';
+            secretInput.value = '';
+            toggleQuickAdd();
+            
+            // Refresh credentials list
+            await loadCredentialsFromDevice();
+        } else {
+            showMessage(result.message || 'Failed to add credential', 'error');
+        }
+    } catch (error) {
+        if (error.type === 'PIN_REQUIRED') {
+            showMessage('PIN required. Please verify PIN first.', 'error');
+        } else {
+            showMessage('Error: ' + error.message, 'error');
+        }
+    }
+}
+
+async function loadCredentialsFromDevice() {
+    if (!oath) return;
+    try {
+        credentials = await oath.listCredentials();
+        await chrome.runtime.sendMessage({
+            action: 'updateDeviceState',
+            connected: true,
+            credentials,
+            pinVerified: oath.pinVerified
+        });
+        renderCredentials();
+        updateConnectionStatus(true, credentials.length);
+    } catch (error) {
+        console.error('Failed to load credentials:', error);
+    }
+}
+
+// QR Code Scanning
+async function handleScanQR() {
+    const video = document.getElementById('qrVideo');
+    const scanner = document.getElementById('qrScanner');
+    
+    try {
+        videoStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment' }
+        });
+        video.srcObject = videoStream;
+        video.play();
+        
+        scanner.style.display = 'block';
+        qrScanning = true;
+        
+        scanQRFrame();
+    } catch (error) {
+        showMessage('Failed to access camera: ' + error.message, 'error');
+    }
+}
+
+function stopQRScanner() {
+    qrScanning = false;
+    if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+        videoStream = null;
+    }
+    document.getElementById('qrScanner').style.display = 'none';
+}
+
+function scanQRFrame() {
+    if (!qrScanning) return;
+    
+    const video = document.getElementById('qrVideo');
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
+        
+        if (code) {
+            const parsed = parseOTPAuthURL(code.data);
+            if (parsed) {
+                document.getElementById('quickCredName').value = parsed.label || parsed.issuer || '';
+                document.getElementById('quickCredSecret').value = parsed.secret || '';
+                
+                stopQRScanner();
+                showMessage('QR code scanned!', 'success');
+                return;
+            }
+        }
+    }
+    
+    requestAnimationFrame(scanQRFrame);
+}
+
+function parseOTPAuthURL(url) {
+    try {
+        if (!url.startsWith('otpauth://')) return null;
+        
+        const parsed = new URL(url);
+        const params = new URLSearchParams(parsed.search);
+        
+        const path = decodeURIComponent(parsed.pathname.substring(1));
+        let label = path;
+        let issuer = params.get('issuer') || '';
+        
+        if (path.includes(':')) {
+            const parts = path.split(':');
+            issuer = parts[0];
+            label = parts[1];
+        }
+        
+        return {
+            type: parsed.hostname,
+            label,
+            issuer,
+            secret: params.get('secret'),
+            algorithm: (params.get('algorithm') || 'SHA1').toUpperCase(),
+            digits: params.get('digits') || '6',
+            period: params.get('period') || '30'
+        };
+    } catch (error) {
+        console.error('Failed to parse OTP URL:', error);
+        return null;
+    }
+}
+
+// Utility function for Base32 decoding
+function base32Decode(str) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const cleaned = str.toUpperCase().replace(/[^A-Z2-7]/g, '');
+    
+    if (cleaned.length === 0) {
+        throw new Error('Empty secret');
+    }
+    
+    const bits = cleaned.split('').map(c => {
+        const index = alphabet.indexOf(c);
+        if (index === -1) throw new Error('Invalid Base32 character');
+        return index.toString(2).padStart(5, '0');
+    }).join('');
+    
+    const bytes = [];
+    for (let i = 0; i + 8 <= bits.length; i += 8) {
+        bytes.push(parseInt(bits.substr(i, 8), 2));
+    }
+    
+    return new Uint8Array(bytes);
 }
 
 function escapeHtml(text) {

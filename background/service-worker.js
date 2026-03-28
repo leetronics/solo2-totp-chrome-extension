@@ -100,6 +100,15 @@ async function handleMessage(request, sender) {
             });
             return { success: true };
 
+        case 'openPopup':
+            // Open the extension popup
+            try {
+                await chrome.action.openPopup();
+                return { success: true };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+
         default:
             // Unknown actions are handled by popup
             return { error: 'Unknown action in background: ' + request.action };

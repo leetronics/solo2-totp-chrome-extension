@@ -403,6 +403,23 @@
         .hidden {
             display: none !important;
         }
+        
+        .quick-add-section {
+            background: white;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .btn-small {
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+        
+        .form-group {
+            margin-bottom: 0;
+        }
     </style>
 </head>
 <body>
@@ -422,6 +439,29 @@
         <div class="device-section" id="deviceSection">
             <p id="deviceStatus">Not connected to SoloKeys GUI</p>
             <button class="btn" id="connectBtn">Connect to SoloKeys GUI</button>
+        </div>
+        
+        <!-- Quick Add Credential (collapsed by default) -->
+        <div class="quick-add-section" id="quickAddSection">
+            <button class="btn btn-secondary btn-small" id="toggleQuickAddBtn" style="width: 100%; margin-bottom: 8px;">
+                + Add Credential for This Site
+            </button>
+            <div id="quickAddForm" class="hidden">
+                <div class="form-group">
+                    <input type="text" id="quickCredName" placeholder="Credential name (e.g., GitHub)" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 8px;">
+                </div>
+                <div class="form-group">
+                    <input type="text" id="quickCredSecret" placeholder="Secret key (Base32)" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 8px;">
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-small" id="scanQrBtn" style="flex: 1;">📷 Scan QR</button>
+                    <button class="btn btn-small" id="addQuickCredBtn" style="flex: 1;">Add</button>
+                </div>
+                <div id="qrScanner" style="display: none; margin-top: 8px;">
+                    <video id="qrVideo" style="width: 100%; border-radius: 4px;"></video>
+                    <button class="btn btn-secondary btn-small" id="stopScanBtn" style="width: 100%; margin-top: 8px;">Stop Scanning</button>
+                </div>
+            </div>
         </div>
         
         <!-- OTP Display -->
@@ -483,6 +523,7 @@
         <p>Please press the button on your SoloKeys</p>
     </div>
     
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
     <script src="popup.js" type="module"></script>
 </body>
 </html>
