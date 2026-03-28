@@ -73,7 +73,10 @@ function validateExtension() {
         'lib/tlv.js',
         'lib/oath.js',
         'lib/utils.js',
-        'icons/icon.svg'
+        'icons/icon.svg',
+        'icons/icon-16.png',
+        'icons/icon-48.png',
+        'icons/icon-128.png'
     ];
     
     let allValid = true;
@@ -377,7 +380,10 @@ dist/
 │   ├── oath.js
 │   └── utils.js
 ├── icons/
-│   └── icon.svg
+│   ├── icon.svg
+│   ├── icon-16.png
+│   ├── icon-48.png
+│   └── icon-128.png
 └── README.md
 \`\`\`
 
