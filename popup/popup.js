@@ -72,19 +72,23 @@ function isCachedWhileOffline() {
 async function silentConnect() {
     // Only try to connect if not already connected
     if (isConnected || isSyncing) return;
-    
+
     // Check if we should auto-connect (were connected recently)
     const stored = await chrome.storage.local.get(['connectionState']);
-    const shouldAutoConnect = stored.connectionState?.wasConnected && 
+    const shouldAutoConnect = stored.connectionState?.wasConnected &&
         stored.connectionState?.lastConnected &&
         (Date.now() - stored.connectionState.lastConnected) < 300000; // 5 minutes
-    
+
     if (shouldAutoConnect) {
         try {
             isSyncing = true;
             await connectToDevice(true); // silent mode
         } catch (error) {
             console.log('Silent connect failed:', error.message);
+            // If waiting for confirmation, don't treat as error
+            if (error.message && error.message.includes('Waiting for SoloKeys GUI confirmation')) {
+                console.log('Waiting for SoloKeys GUI confirmation - will retry on next user action');
+            }
         } finally {
             isSyncing = false;
         }
@@ -147,18 +151,37 @@ async function handleConnect() {
         helpText.style.display = 'none';
     } catch (error) {
         console.error('Connection error:', error);
-        showMessage('Connection failed: ' + error.message, 'error');
-        updateConnectionStatus(false, credentials.length, isCachedWhileOffline());
-        helpText.style.display = 'block';
-        helpText.textContent = 'Click to try again';
-    } finally {
-        connectBtn.disabled = false;
+        
+        // Check if this is a "waiting for confirmation" error
+        if (error.message && error.message.includes('Waiting for SoloKeys GUI confirmation')) {
+            showMessage('Please approve the connection in SoloKeys GUI, then click Connect again', 'info');
+            helpText.style.display = 'block';
+            helpText.textContent = 'Waiting for approval... Click Connect again after approving in SoloKeys GUI';
+            connectBtn.textContent = 'Connect to SoloKeys GUI';
+            connectBtn.disabled = false;
+        } else {
+            showMessage('Connection failed: ' + error.message, 'error');
+            updateConnectionStatus(false, credentials.length, isCachedWhileOffline());
+            helpText.style.display = 'block';
+            helpText.textContent = 'Click to try again';
+            connectBtn.textContent = 'Connect to SoloKeys GUI';
+            connectBtn.disabled = false;
+        }
     }
 }
 
 async function connectToDevice(silent = false) {
     device = new NativeTransport();
-    await device.connect(30000); // 30 second timeout for user confirmation
+
+    try {
+        await device.connect(60000); // 60 second timeout for user confirmation
+    } catch (error) {
+        // If waiting for confirmation, don't immediately fail - give user time to approve
+        if (error.message && error.message.includes('Waiting for SoloKeys GUI confirmation')) {
+            throw error; // Re-throw so caller can handle it
+        }
+        throw error;
+    }
 
     oath = new OATHProtocol(device);
 
@@ -181,7 +204,7 @@ async function connectToDevice(silent = false) {
 
     updateConnectionStatus(true, creds.length);
     renderCredentials();
-    
+
     if (!silent) {
         showMessage('Connected to SoloKeys GUI!', 'success');
     }
