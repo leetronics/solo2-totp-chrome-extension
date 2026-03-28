@@ -404,39 +404,91 @@ function observeDOM() {
 async function scanImagesForQR() {
     const images = document.querySelectorAll('img');
     const results = [];
-    
-    for (const img of images) {
+
+    // Prioritize images with TOTP-related IDs or attributes
+    const totpRelatedImages = [];
+    const otherImages = [];
+
+    images.forEach(img => {
+        const id = (img.id || '').toLowerCase();
+        const className = (img.className || '').toLowerCase();
+        const alt = (img.alt || '').toLowerCase();
+        const src = (img.src || '').toLowerCase();
+
+        // Check if image is related to TOTP/QR
+        if (id.includes('totp') || id.includes('qr') || id.includes('mfa') || id.includes('2fa') ||
+            className.includes('totp') || className.includes('qr') || className.includes('mfa') ||
+            alt.includes('totp') || alt.includes('qr') || alt.includes('qr code') ||
+            src.includes('totp') || src.includes('qr')) {
+            totpRelatedImages.push(img);
+        } else {
+            otherImages.push(img);
+        }
+    });
+
+    // Scan TOTP-related images first, then others
+    const imagesToScan = [...totpRelatedImages, ...otherImages];
+
+    for (const img of imagesToScan) {
         try {
+            // Ensure image is loaded and has dimensions
+            if (!img.complete) {
+                // Wait for image to load
+                await new Promise((resolve) => {
+                    img.onload = resolve;
+                    img.onerror = resolve;
+                    // Timeout after 2 seconds
+                    setTimeout(resolve, 2000);
+                });
+            }
+
+            // Get dimensions - try multiple sources
+            let width = img.naturalWidth || img.width || 0;
+            let height = img.naturalHeight || img.height || 0;
+
             // Skip very small images (likely icons)
-            if (img.width < 50 || img.height < 50) continue;
-            
+            if (width < 50 || height < 50) continue;
+
             // Create canvas to draw image
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            canvas.width = img.naturalWidth || img.width;
-            canvas.height = img.naturalHeight || img.height;
-            
+            canvas.width = width;
+            canvas.height = height;
+
             // Draw image to canvas
-            ctx.drawImage(img, 0, 0);
-            
+            ctx.drawImage(img, 0, 0, width, height);
+
             // Get image data
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            
+
+            // Check if image has actual data (not transparent)
+            if (imageData.data.every(pixel => pixel === 0)) {
+                console.log('SoloKeys: Skipping empty/transparent image');
+                continue;
+            }
+
             // Try to decode QR
-            const code = jsQR(imageData.data, imageData.width, imageData.height);
-            
+            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: 'attemptBoth' // Try both normal and inverted colors
+            });
+
             if (code && code.data.startsWith('otpauth://')) {
+                console.log('SoloKeys: Found QR code:', code.data.substring(0, 50) + '...');
                 results.push({
                     url: code.data,
                     imgSrc: img.src
                 });
+            } else if (code) {
+                // Found QR but not OTP - log for debugging
+                console.log('SoloKeys: Found non-OTP QR code:', code.data.substring(0, 50));
             }
         } catch (error) {
-            // Skip images that can't be processed
+            console.log('SoloKeys: Error processing image:', error.message);
             continue;
         }
     }
-    
+
+    console.log('SoloKeys: Scan complete, found', results.length, 'QR codes');
     return results;
 }
 
