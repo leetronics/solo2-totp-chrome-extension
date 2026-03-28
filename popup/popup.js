@@ -16,13 +16,15 @@ let timerInterval = null;
 let isConnected = false;
 let pendingCredentialName = null;
 let pendingAction = 'display'; // 'display' | 'copy' | 'type'
+let isSyncing = false;
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     await loadStateFromBackground();
     await checkCurrentSite();
-    await checkExistingDevice();
+    // Try to connect in background, but don't block UI
+    silentConnect();
 });
 
 function setupEventListeners() {
@@ -41,10 +43,18 @@ async function loadStateFromBackground() {
         const response = await chrome.runtime.sendMessage({ action: 'getDeviceState' });
         isConnected = response.connected;
         credentials = response.credentials || [];
-        updateConnectionStatus(isConnected, credentials.length);
+        
+        // Always show credentials (cached or live)
+        updateConnectionStatus(isConnected, credentials.length, response.cached);
         renderCredentials();
     } catch (error) {
         console.error('Failed to load state:', error);
+        // Still try to show cached credentials
+        const stored = await chrome.storage.local.get(['credentialCache']);
+        if (stored.credentialCache?.credentials) {
+            credentials = stored.credentialCache.credentials;
+            renderCredentials();
+        }
     }
 }
 
@@ -52,12 +62,24 @@ function isCachedWhileOffline() {
     return !isConnected && credentials.length > 0;
 }
 
-async function checkExistingDevice() {
-    if (!isConnected) {
+async function silentConnect() {
+    // Only try to connect if not already connected
+    if (isConnected || isSyncing) return;
+    
+    // Check if we should auto-connect (were connected recently)
+    const stored = await chrome.storage.local.get(['connectionState']);
+    const shouldAutoConnect = stored.connectionState?.wasConnected && 
+        stored.connectionState?.lastConnected &&
+        (Date.now() - stored.connectionState.lastConnected) < 300000; // 5 minutes
+    
+    if (shouldAutoConnect) {
         try {
-            await connectToDevice();
+            isSyncing = true;
+            await connectToDevice(true); // silent mode
         } catch (error) {
-            console.log('Auto-connect failed (device not ready):', error.message);
+            console.log('Silent connect failed:', error.message);
+        } finally {
+            isSyncing = false;
         }
     }
 }
@@ -79,7 +101,7 @@ async function checkCurrentSite() {
     }
 }
 
-function updateConnectionStatus(connected, count) {
+function updateConnectionStatus(connected, count, isCached = false) {
     const indicator = document.getElementById('statusIndicator');
     const statusText = document.getElementById('deviceStatus');
     const connectBtn = document.getElementById('connectBtn');
@@ -89,6 +111,11 @@ function updateConnectionStatus(connected, count) {
         statusText.textContent = `Connected to SoloKeys GUI • ${count} credentials`;
         connectBtn.textContent = 'Reconnect';
         isConnected = true;
+    } else if (isCached) {
+        indicator.classList.remove('connected');
+        statusText.textContent = `Cached • ${count} credentials`;
+        connectBtn.textContent = 'Connect to SoloKeys GUI';
+        isConnected = false;
     } else {
         indicator.classList.remove('connected');
         statusText.textContent = 'Not connected to SoloKeys GUI';
@@ -103,16 +130,17 @@ async function handleConnect() {
     connectBtn.disabled = true;
 
     try {
-        await connectToDevice();
+        await connectToDevice(false); // explicit user action, not silent
     } catch (error) {
         console.error('Connection error:', error);
         showMessage('Connection failed: ' + error.message, 'error');
-        connectBtn.textContent = 'Connect SoloKeys';
+        updateConnectionStatus(false, credentials.length, isCachedWhileOffline());
+    } finally {
         connectBtn.disabled = false;
     }
 }
 
-async function connectToDevice() {
+async function connectToDevice(silent = false) {
     device = new NativeTransport();
     await device.connect();
 
@@ -137,10 +165,13 @@ async function connectToDevice() {
 
     updateConnectionStatus(true, creds.length);
     renderCredentials();
-    showMessage('Connected to SoloKeys GUI!', 'success');
+    
+    if (!silent) {
+        showMessage('Connected to SoloKeys GUI!', 'success');
+    }
 
     const connectBtn = document.getElementById('connectBtn');
-    connectBtn.textContent = 'Reconnect Device';
+    connectBtn.textContent = 'Reconnect';
     connectBtn.disabled = false;
 }
 
@@ -148,8 +179,14 @@ async function connectToDevice() {
 // action: 'display' (show in panel) | 'copy' (to clipboard) | 'type' (fill page)
 async function generateOTP(credential, action = 'display') {
     if (!isConnected || !oath) {
-        showMessage('Connect to SoloKeys GUI to generate a code', 'info');
-        return;
+        // Try to connect first
+        try {
+            showMessage('Connecting to SoloKeys GUI...', 'info');
+            await connectToDevice();
+        } catch (error) {
+            showMessage('Connect to SoloKeys GUI to generate a code', 'info');
+            return;
+        }
     }
 
     currentCredential = credential;
@@ -167,6 +204,9 @@ async function generateOTP(credential, action = 'display') {
             showPinModal();
         } else {
             showMessage(error.message || 'Failed to generate OTP', 'error');
+            // Connection might be stale, mark as disconnected
+            isConnected = false;
+            updateConnectionStatus(false, credentials.length, true);
         }
     }
 }

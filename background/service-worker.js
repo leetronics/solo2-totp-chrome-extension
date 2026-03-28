@@ -10,6 +10,7 @@ let currentTabHostname = null;
 let matchingCredentials = [];
 let deviceConnected = false;
 let pinVerified = false;
+let lastConnectionAttempt = 0;
 
 // Initialize on startup
 chrome.runtime.onStartup.addListener(initialize);
@@ -17,11 +18,20 @@ chrome.runtime.onInstalled.addListener(initialize);
 
 async function initialize() {
     console.log('SoloKeys TOTP: Service worker initialized');
+    
     // Load cached credentials so popup can show them when device is disconnected
-    const stored = await chrome.storage.local.get(['credentialCache']);
+    const stored = await chrome.storage.local.get(['credentialCache', 'connectionState']);
     if (stored.credentialCache?.credentials) {
         credentials = stored.credentialCache.credentials;
     }
+    
+    // Restore connection state if we were previously connected
+    if (stored.connectionState?.wasConnected) {
+        console.log('SoloKeys TOTP: Previous connection detected, will auto-reconnect on next use');
+    }
+    
+    // Update badge with any cached matches
+    updateBadge();
 }
 
 // Handle messages from popup and content scripts
@@ -48,6 +58,13 @@ async function handleMessage(request, sender) {
                     });
                 }
             }
+            // Save connection state
+            await chrome.storage.local.set({
+                connectionState: { 
+                    wasConnected: deviceConnected, 
+                    lastConnected: deviceConnected ? Date.now() : null 
+                }
+            });
             updateBadge();
             return { success: true };
 
@@ -56,7 +73,8 @@ async function handleMessage(request, sender) {
                 connected: deviceConnected,
                 credentials,
                 pinVerified: pinVerified,
-                credentialCount: credentials.length
+                credentialCount: credentials.length,
+                cached: !deviceConnected && credentials.length > 0
             };
 
         case 'getCredentials':
@@ -67,6 +85,20 @@ async function handleMessage(request, sender) {
 
         case 'getMatchingCredentials':
             return { credentials: matchingCredentials };
+
+        case 'setConnectionState':
+            // Allow popup to explicitly set connection state
+            deviceConnected = request.connected;
+            if (request.pinVerified !== undefined) {
+                pinVerified = request.pinVerified;
+            }
+            await chrome.storage.local.set({
+                connectionState: { 
+                    wasConnected: deviceConnected, 
+                    lastConnected: deviceConnected ? Date.now() : null 
+                }
+            });
+            return { success: true };
 
         default:
             // Unknown actions are handled by popup
