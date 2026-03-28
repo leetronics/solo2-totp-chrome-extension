@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "SoloKeys TOTP",
+  "version": "1.0.0",
+  "description": "TOTP provider for SoloKeys 2 security keys",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "notifications",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon.svg",
+      "48": "icons/icon.svg",
+      "128": "icons/icon.svg"
+    }
+  },
+  "options_page": "options/options.html",
+  "icons": {
+    "16": "icons/icon.svg",
+    "48": "icons/icon.svg",
+    "128": "icons/icon.svg"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["lib/*", "connection/*", "icons/*", "test.html"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

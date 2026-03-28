@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="20" fill="url(#grad)"/>
+  <!-- Lock body -->
+  <rect x="34" y="54" width="60" height="45" rx="8" fill="white"/>
+  <!-- Lock shackle -->
+  <path d="M 44 54 L 44 44 A 20 20 0 0 1 84 44 L 84 54" 
+        fill="none" stroke="white" stroke-width="12" stroke-linecap="round"/>
+  <!-- Keyhole -->
+  <circle cx="64" cy="76" r="8" fill="#667eea"/>
+  <rect x="61" y="76" width="6" height="12" rx="2" fill="#667eea"/>
+</svg>

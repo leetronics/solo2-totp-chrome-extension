@@ -1,0 +1,94 @@
+name: Build and Release Extension
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Validate Extension
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Validate extension structure
+      run: node build.js --validate
+
+  build:
+    runs-on: ubuntu-latest
+    name: Build Extension
+    needs: validate
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Build extension
+      run: node build.js --zip
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: extension-package
+        path: |
+          solokeys-totp-*.zip
+          dist/
+          INSTALL-*.md
+        retention-days: 30
+
+  release:
+    runs-on: ubuntu-latest
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Build extension
+      run: node build.js --zip
+    
+    - name: Get version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          solokeys-totp-*.zip
+          INSTALL-*.md
+        name: Release ${{ steps.get_version.outputs.VERSION }}
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

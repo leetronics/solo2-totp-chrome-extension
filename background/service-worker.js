@@ -1,0 +1,140 @@
+// background/service-worker.js
+// Background service worker for SoloKeys TOTP extension
+// Handles device management through popup relay (WebHID not available in service workers)
+
+import { matchesSite } from '../lib/utils.js';
+
+// Global state
+let credentials = [];
+let currentTabHostname = null;
+let matchingCredentials = [];
+let deviceConnected = false;
+let pinVerified = false;
+
+// Initialize on startup
+chrome.runtime.onStartup.addListener(initialize);
+chrome.runtime.onInstalled.addListener(initialize);
+
+async function initialize() {
+    console.log('SoloKeys TOTP: Service worker initialized');
+    // Load cached credentials so popup can show them when device is disconnected
+    const stored = await chrome.storage.local.get(['credentialCache']);
+    if (stored.credentialCache?.credentials) {
+        credentials = stored.credentialCache.credentials;
+    }
+}
+
+// Handle messages from popup and content scripts
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    handleMessage(request, sender).then(sendResponse).catch(error => {
+        console.error('Message handler error:', error);
+        sendResponse({ error: error.message || String(error) });
+    });
+    return true; // Keep channel open for async response
+});
+
+async function handleMessage(request, sender) {
+    switch (request.action) {
+        case 'updateDeviceState':
+            // Popup updates us on device connection status
+            deviceConnected = request.connected;
+            pinVerified = request.pinVerified || false;
+            if (request.credentials) {
+                credentials = request.credentials;
+                // Persist fresh credentials for offline display
+                if (credentials.length) {
+                    await chrome.storage.local.set({
+                        credentialCache: { credentials, cachedAt: Date.now() }
+                    });
+                }
+            }
+            updateBadge();
+            return { success: true };
+
+        case 'getDeviceState':
+            return {
+                connected: deviceConnected,
+                credentials,
+                pinVerified: pinVerified,
+                credentialCount: credentials.length
+            };
+
+        case 'getCredentials':
+            return { credentials };
+
+        case 'checkSiteMatch':
+            return await handleCheckSiteMatch(request.hostname);
+
+        case 'getMatchingCredentials':
+            return { credentials: matchingCredentials };
+
+        default:
+            // Unknown actions are handled by popup
+            return { error: 'Unknown action in background: ' + request.action };
+    }
+}
+
+async function handleCheckSiteMatch(hostname) {
+    currentTabHostname = hostname;
+
+    if (!currentTabHostname) {
+        matchingCredentials = [];
+    } else {
+        matchingCredentials = credentials.filter(cred =>
+            matchesSite(cred.name, currentTabHostname)
+        );
+    }
+
+    updateBadge();
+
+    // Notify content script
+    if (matchingCredentials.length > 0) {
+        try {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tab) {
+                await chrome.tabs.sendMessage(tab.id, {
+                    action: 'matchingCredentials',
+                    credentials: matchingCredentials
+                });
+            }
+        } catch (error) {
+            console.log('Could not notify content script:', error);
+        }
+    }
+
+    return {
+        hasMatches: matchingCredentials.length > 0,
+        count: matchingCredentials.length,
+        credentials: matchingCredentials
+    };
+}
+
+function updateBadge() {
+    const count = matchingCredentials.length;
+    chrome.action.setBadgeText({ text: count > 0 ? count.toString() : '' });
+    chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+}
+
+// Listen for tab changes to update matching credentials
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+        if (tab && tab.url) {
+            const hostname = new URL(tab.url).hostname;
+            await handleCheckSiteMatch(hostname);
+        }
+    } catch (error) {
+        console.log('Tab switch error:', error);
+    }
+});
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'complete' && tab.active && tab.url) {
+        try {
+            const hostname = new URL(tab.url).hostname;
+            await handleCheckSiteMatch(hostname);
+        } catch (error) {
+            console.log('Tab update error:', error);
+        }
+    }
+});

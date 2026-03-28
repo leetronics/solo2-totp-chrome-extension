@@ -1,0 +1,27 @@
+{
+  "name": "solokeys-totp-extension",
+  "version": "1.0.0",
+  "description": "TOTP provider for SoloKeys 2 security keys - Chrome Extension",
+  "scripts": {
+    "build": "node build.js",
+    "build:zip": "node build.js --zip",
+    "build:crx": "node build.js --crx",
+    "validate": "node build.js --validate",
+    "clean": "rm -rf dist/",
+    "lint": "npx eslint . --ext .js || true",
+    "test": "echo 'No tests specified'"
+  },
+  "keywords": [
+    "solokeys",
+    "totp",
+    "2fa",
+    "security-key",
+    "chrome-extension"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "archiver": "^6.0.1",
+    "chalk": "^4.1.2"
+  }
+}
