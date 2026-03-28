@@ -405,90 +405,189 @@ async function scanImagesForQR() {
     const images = document.querySelectorAll('img');
     const results = [];
 
-    // Prioritize images with TOTP-related IDs or attributes
-    const totpRelatedImages = [];
-    const otherImages = [];
-
-    images.forEach(img => {
-        const id = (img.id || '').toLowerCase();
-        const className = (img.className || '').toLowerCase();
-        const alt = (img.alt || '').toLowerCase();
-        const src = (img.src || '').toLowerCase();
-
-        // Check if image is related to TOTP/QR
-        if (id.includes('totp') || id.includes('qr') || id.includes('mfa') || id.includes('2fa') ||
-            className.includes('totp') || className.includes('qr') || className.includes('mfa') ||
-            alt.includes('totp') || alt.includes('qr') || alt.includes('qr code') ||
-            src.includes('totp') || src.includes('qr')) {
-            totpRelatedImages.push(img);
-        } else {
-            otherImages.push(img);
-        }
-    });
-
-    // Scan TOTP-related images first, then others
-    const imagesToScan = [...totpRelatedImages, ...otherImages];
-
-    for (const img of imagesToScan) {
+    for (const img of images) {
         try {
-            // Ensure image is loaded and has dimensions
-            if (!img.complete) {
-                // Wait for image to load
-                await new Promise((resolve) => {
-                    img.onload = resolve;
-                    img.onerror = resolve;
-                    // Timeout after 2 seconds
-                    setTimeout(resolve, 2000);
-                });
+            // Skip display:none or hidden images
+            const style = window.getComputedStyle(img);
+            if (style.display === 'none' || style.visibility === 'hidden' || 
+                parseFloat(style.opacity) === 0) {
+                continue;
             }
 
-            // Get dimensions - try multiple sources
-            let width = img.naturalWidth || img.width || 0;
-            let height = img.naturalHeight || img.height || 0;
+            // Get dimensions - handle various ways images might be sized
+            let width = img.naturalWidth || img.width || 
+                       parseInt(style.width) || img.clientWidth || 0;
+            let height = img.naturalHeight || img.height || 
+                        parseInt(style.height) || img.clientHeight || 0;
 
-            // Skip very small images (likely icons)
-            if (width < 50 || height < 50) continue;
+            // Fallback to getting from attributes
+            if (width === 0 || height === 0) {
+                width = parseInt(img.getAttribute('width')) || 0;
+                height = parseInt(img.getAttribute('height')) || 0;
+            }
+
+            // For TOTP-related images, be more lenient with size
+            const id = (img.id || '').toLowerCase();
+            const className = (img.className || '').toLowerCase();
+            const isTotpRelated = id.includes('totp') || id.includes('qr') || 
+                                id.includes('mfa') || id.includes('2fa') ||
+                                className.includes('totp') || className.includes('qr') || 
+                                className.includes('mfa') || className.includes('authenticator');
+
+            // Skip very small images unless they're TOTP-related
+            if (!isTotpRelated && width < 50 && height < 50) continue;
+            
+            // Even for non-TOTP images, don't skip if reasonably sized for QR
+            if (width < 30 || height < 30) continue;
+
+            // Ensure image is loaded
+            if (!img.complete && img.naturalWidth === 0 && img.naturalHeight === 0) {
+                // Wait for image to load with timeout
+                await new Promise((resolve, reject) => {
+                    const timeoutId = setTimeout(() => {
+                        reject(new Error('Image load timeout'));
+                    }, 3000);
+                    
+                    img.onload = () => {
+                        clearTimeout(timeoutId);
+                        resolve();
+                    };
+                    img.onerror = () => {
+                        clearTimeout(timeoutId);
+                        reject(new Error('Image load error'));
+                    };
+                });
+                
+                // Update dimensions after loading
+                width = img.naturalWidth || img.width || 
+                       parseInt(style.width) || img.clientWidth || 0;
+                height = img.naturalHeight || img.height || 
+                        parseInt(style.height) || img.clientHeight || 0;
+            }
+
+            // Skip if still no valid dimensions
+            if (width === 0 || height === 0) continue;
 
             // Create canvas to draw image
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
+            
+            // Handle potential overflow/canvas size limits
+            const maxDimension = 2000;
+            if (width > maxDimension || height > maxDimension) {
+                const scale = Math.min(maxDimension / width, maxDimension / height);
+                width = Math.round(width * scale);
+                height = Math.round(height * scale);
+            }
+            
             canvas.width = width;
             canvas.height = height;
 
-            // Draw image to canvas
-            ctx.drawImage(img, 0, 0, width, height);
+            try {
+                // Draw image to canvas
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // Get image data
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                
+                // Check if image has actual data (not completely transparent)
+                let hasData = false;
+                for (let i = 3; i < imageData.data.length; i += 4) {
+                    if (imageData.data[i] > 0) { // Alpha channel > 0
+                        hasData = true;
+                        break;
+                    }
+                }
+                
+                if (!hasData) {
+                    console.log('SoloKeys: Skipping transparent image');
+                    continue;
+                }
 
-            // Get image data
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                // Try to decode QR with multiple attempts
+                let code = null;
+                
+                // Attempt 1: Normal
+                try {
+                    code = jsQR(imageData.data, imageData.width, imageData.height);
+                } catch (e) {
+                    // Try with inversion
+                    try {
+                        code = jsQR(imageData.data, imageData.width, imageData.height, {
+                            inversionAttempts: 'attemptBoth'
+                        });
+                    } catch (e2) {
+                        // Try with gamma correction
+                        try {
+                            // Create a copy with adjusted contrast
+                            const adjusted = new Uint8ClampedArray(imageData.data);
+                            for (let i = 0; i < adjusted.length; i += 4) {
+                                // Increase contrast
+                                adjusted[i] = Math.min(255, ((adjusted[i] - 128) * 1.5 + 128)); // R
+                                adjusted[i+1] = Math.min(255, ((adjusted[i+1] - 128) * 1.5 + 128)); // G
+                                adjusted[i+2] = Math.min(255, ((adjusted[i+2] - 128) * 1.5 + 128)); // B
+                            }
+                            code = jsQR(adjusted, imageData.width, imageData.height, {
+                                inversionAttempts: 'attemptBoth'
+                            });
+                        } catch (e3) {
+                            // All attempts failed
+                        }
+                    }
+                }
 
-            // Check if image has actual data (not transparent)
-            if (imageData.data.every(pixel => pixel === 0)) {
-                console.log('SoloKeys: Skipping empty/transparent image');
+                if (code && code.data.startsWith('otpauth://')) {
+                    console.log('SoloKeys: Found OTP QR code in', 
+                              isTotpRelated ? 'TOTP-related image' : 'image',
+                              '(size:', width, 'x', height, ') -', 
+                              code.data.substring(0, 50) + '...');
+                    results.push({
+                        url: code.data,
+                        imgSrc: img.src,
+                        width: width,
+                        height: height,
+                        isTotpRelated
+                    });
+                } else if (code) {
+                    // Found QR but not OTP
+                    console.log('SoloKeys: Found non-OTP QR code in image (size:', 
+                              width, 'x', height, '):', 
+                              code.data.substring(0, 30) + '...');
+                }
+            } catch (drawError) {
+                console.log('SoloKeys: Error drawing image to canvas:', drawError.message);
                 continue;
             }
-
-            // Try to decode QR
-            const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                inversionAttempts: 'attemptBoth' // Try both normal and inverted colors
-            });
-
-            if (code && code.data.startsWith('otpauth://')) {
-                console.log('SoloKeys: Found QR code:', code.data.substring(0, 50) + '...');
-                results.push({
-                    url: code.data,
-                    imgSrc: img.src
-                });
-            } else if (code) {
-                // Found QR but not OTP - log for debugging
-                console.log('SoloKeys: Found non-OTP QR code:', code.data.substring(0, 50));
-            }
         } catch (error) {
-            console.log('SoloKeys: Error processing image:', error.message);
+            // Only log errors for TOTP-related images to reduce noise
+            const id = (img.id || '').toLowerCase();
+            const className = (img.className || '').toLowerCase();
+            const isTotpRelated = id.includes('totp') || id.includes('qr') || 
+                                id.includes('mfa') || id.includes('2fa') ||
+                                className.includes('totp') || className.includes('qr') || 
+                                className.includes('mfa') || className.includes('authenticator');
+                                
+            if (isTotpRelated) {
+                console.log('SoloKeys: Error processing TOTP-related image:', error.message);
+            }
             continue;
         }
     }
 
+    // Sort results: TOTP-related first, then by size (largest first)
+    results.sort((a, b) => {
+        if (a.isTotpRelated !== b.isTotpRelated) {
+            return b.isTotpRelated ? -1 : 1; // TOTP-related first
+        }
+        return (b.width * b.height) - (a.width * a.height); // Largest first
+    });
+
     console.log('SoloKeys: Scan complete, found', results.length, 'QR codes');
+    if (results.length > 0) {
+        console.log('SoloKeys: Best result:', 
+                   results[0].isTotpRelated ? 'TOTP-related' : 'regular', 
+                   'image', results[0].width, 'x', results[0].height);
+    }
     return results;
 }
 
