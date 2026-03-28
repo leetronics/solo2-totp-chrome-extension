@@ -3,6 +3,7 @@
 
 let detectedOTPFields = [];
 let matchingCredentials = [];
+let hasRequestedCredentials = false;
 
 // Initialize on page load
 if (document.readyState === 'loading') {
@@ -17,6 +18,9 @@ function initialize() {
     
     // Detect OTP fields
     detectOTPFields();
+    
+    // Request matching credentials from background
+    requestMatchingCredentials();
     
     // Listen for changes (dynamic content)
     observeDOM();
@@ -35,7 +39,27 @@ function reportSite() {
     }
 }
 
+async function requestMatchingCredentials() {
+    if (hasRequestedCredentials) return;
+    hasRequestedCredentials = true;
+    
+    try {
+        const response = await chrome.runtime.sendMessage({ 
+            action: 'getMatchingCredentials' 
+        });
+        
+        if (response.credentials) {
+            matchingCredentials = response.credentials;
+            // Enhance all detected OTP fields with indicators
+            detectedOTPFields.forEach(field => enhanceOTPField(field));
+        }
+    } catch (error) {
+        console.log('Could not get matching credentials:', error);
+    }
+}
+
 function detectOTPFields() {
+    // Clear previous detections to avoid duplicates
     detectedOTPFields = [];
     
     // Look for input fields that might be OTP inputs
@@ -82,17 +106,22 @@ function isOTPField(input) {
 }
 
 function enhanceOTPField(input) {
-    // Add SoloKeys indicator if we have matching credentials
-    if (matchingCredentials.length > 0) {
-        addSoloKeysIndicator(input);
-    }
-}
-
-function addSoloKeysIndicator(input) {
-    // Check if already added
+    // Don't add indicator if already added
     if (input.parentElement?.querySelector('.solokeys-indicator')) {
         return;
     }
+    
+    // Make input position relative if not already
+    const inputParent = input.parentElement;
+    if (!inputParent) return;
+    
+    if (getComputedStyle(inputParent).position === 'static') {
+        inputParent.style.position = 'relative';
+    }
+    
+    // Always add SoloKeys icon to OTP fields for discovery
+    // Show different states based on whether we have matching credentials
+    const hasMatches = matchingCredentials.length > 0;
     
     const container = document.createElement('div');
     container.className = 'solokeys-indicator';
@@ -104,7 +133,7 @@ function addSoloKeysIndicator(input) {
         display: flex;
         align-items: center;
         gap: 4px;
-        background: #667eea;
+        background: ${hasMatches ? '#667eea' : '#888'};
         color: white;
         padding: 4px 8px;
         border-radius: 4px;
@@ -112,25 +141,46 @@ function addSoloKeysIndicator(input) {
         cursor: pointer;
         z-index: 1000;
         box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        transition: background 0.2s;
     `;
-    container.innerHTML = `
-        <span>🔐</span>
-        <span>${matchingCredentials.length} key${matchingCredentials.length > 1 ? 's' : ''}</span>
-    `;
+    
+    if (hasMatches) {
+        container.innerHTML = `
+            <span>🔐</span>
+            <span>${matchingCredentials.length} key${matchingCredentials.length > 1 ? 's' : ''}</span>
+        `;
+        container.title = 'Click to fill with SoloKeys';
+    } else {
+        container.innerHTML = `<span>🔐</span>`;
+        container.title = 'No matching SoloKeys credentials for this site';
+    }
     
     container.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        showCredentialSelector(input);
+        if (hasMatches) {
+            showCredentialSelector(input);
+        } else {
+            showNotification('No matching credentials for this site', 'info');
+            // Open popup to add credentials
+            setTimeout(() => {
+                chrome.runtime.sendMessage({ action: 'openPopup' });
+            }, 500);
+        }
     });
     
-    // Make input position relative if not already
-    const inputParent = input.parentElement;
-    if (inputParent && getComputedStyle(inputParent).position === 'static') {
-        inputParent.style.position = 'relative';
-    }
+    // Hover effects
+    container.addEventListener('mouseenter', () => {
+        container.style.background = hasMatches ? '#5a6fd6' : '#666';
+    });
+    container.addEventListener('mouseleave', () => {
+        container.style.background = hasMatches ? '#667eea' : '#888';
+    });
     
     inputParent.appendChild(container);
+    
+    // Add padding to input so text doesn't overlap with indicator
+    input.style.paddingRight = hasMatches ? '70px' : '36px';
 }
 
 function showCredentialSelector(input) {
@@ -156,7 +206,7 @@ function showCredentialSelector(input) {
     `;
     
     selector.innerHTML = matchingCredentials.map(cred => `
-        <div class="solokeys-option" data-name="${cred.name}" style="
+        <div class="solokeys-option" data-name="${escapeHtml(cred.name)}" style="
             padding: 10px 12px;
             cursor: pointer;
             border-bottom: 1px solid #eee;
@@ -209,16 +259,7 @@ async function generateAndFillOTP(input, credentialName) {
         });
         
         if (response.success) {
-            input.value = response.otp;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-            
-            // Flash success
-            input.style.background = '#e8f5e9';
-            setTimeout(() => {
-                input.style.background = '';
-                input.style.opacity = '';
-            }, 500);
+            fillInputWithOTP(input, response.otp);
         } else if (response.touchRequired) {
             showNotification('Please touch your SoloKeys', 'info');
             // Poll for touch
@@ -236,6 +277,30 @@ async function generateAndFillOTP(input, credentialName) {
     }
 }
 
+function fillInputWithOTP(input, otp) {
+    // Use native setter for React/Vue compatibility
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+        input.tagName === 'INPUT' ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype,
+        'value'
+    )?.set;
+    
+    if (nativeSetter) {
+        nativeSetter.call(input, otp);
+    } else {
+        input.value = otp;
+    }
+    
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    
+    // Flash success
+    input.style.background = '#e8f5e9';
+    input.style.opacity = '';
+    setTimeout(() => {
+        input.style.background = '';
+    }, 500);
+}
+
 async function pollForTouchAndFill(input, credentialName) {
     let attempts = 0;
     const maxAttempts = 30;
@@ -250,14 +315,7 @@ async function pollForTouchAndFill(input, credentialName) {
             });
             
             if (response.success) {
-                input.value = response.otp;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-                input.style.background = '#e8f5e9';
-                input.style.opacity = '';
-                setTimeout(() => {
-                    input.style.background = '';
-                }, 500);
+                fillInputWithOTP(input, response.otp);
                 return;
             }
             
@@ -347,7 +405,14 @@ function handleMessage(request, sender, sendResponse) {
     switch (request.action) {
         case 'matchingCredentials':
             matchingCredentials = request.credentials || [];
-            detectedOTPFields.forEach(field => enhanceOTPField(field));
+            // Re-enhance all fields with new credential info
+            detectedOTPFields.forEach(field => {
+                // Remove old indicator
+                const oldIndicator = field.parentElement?.querySelector('.solokeys-indicator');
+                if (oldIndicator) oldIndicator.remove();
+                // Re-add with updated state
+                enhanceOTPField(field);
+            });
             sendResponse({ received: true });
             break;
 
@@ -357,25 +422,12 @@ function handleMessage(request, sender, sendResponse) {
             const active = document.activeElement;
 
             if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
-                // Native input setter so React/Vue controlled inputs notice the change
-                const nativeSetter = Object.getOwnPropertyDescriptor(
-                    active.tagName === 'INPUT' ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype,
-                    'value'
-                )?.set;
-                if (nativeSetter) {
-                    nativeSetter.call(active, otp);
-                } else {
-                    active.value = otp;
-                }
-                active.dispatchEvent(new Event('input', { bubbles: true }));
-                active.dispatchEvent(new Event('change', { bubbles: true }));
+                fillInputWithOTP(active, otp);
                 filled = true;
             } else if (detectedOTPFields.length > 0) {
                 const field = detectedOTPFields[0];
                 field.focus();
-                field.value = otp;
-                field.dispatchEvent(new Event('input', { bubbles: true }));
-                field.dispatchEvent(new Event('change', { bubbles: true }));
+                fillInputWithOTP(field, otp);
                 filled = true;
             }
 
