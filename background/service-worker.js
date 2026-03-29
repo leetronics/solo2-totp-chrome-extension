@@ -16,6 +16,8 @@ let lastConnectionAttempt = 0;
 chrome.runtime.onStartup.addListener(initialize);
 chrome.runtime.onInstalled.addListener(initialize);
 
+// No JS icon setting - rely on manifest theme_icons
+
 async function initialize() {
     console.log('SoloKeys TOTP: Service worker initialized');
     

@@ -80,7 +80,7 @@
         input[type="password"]:focus,
         select:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #111;
         }
         
         .form-row {
@@ -109,7 +109,7 @@
         }
         
         .btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #111;
             color: white;
             border: none;
             padding: 14px 28px;
@@ -206,7 +206,7 @@
         }
         
         .tab.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #111;
             color: white;
         }
         
@@ -348,7 +348,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔐 SoloKeys TOTP</h1>
+            <img src="../icons/solokeys_logo.png" alt="SoloKeys" style="height:50px; margin-bottom: 12px;">
+            <h1 style="color: #111;">Solo 2 TOTP</h1>
             <p>Manage your TOTP credentials and device settings</p>
         </div>
         
@@ -356,11 +357,11 @@
         <div class="card">
             <div class="status-bar">
                 <div class="status-indicator" id="statusIndicator"></div>
-                <span id="statusText">SoloKey not connected</span>
-                <button class="btn" id="connectBtn" style="margin-left: auto;">Connect to SoloKey</button>
+                <span id="statusText">Solo 2 not connected</span>
+                <button class="btn" id="connectBtn" style="margin-left: auto;">Connect to Solo 2</button>
             </div>
             <p id="connectHelp" style="font-size: 12px; color: #666; margin-top: 8px; display: none;">
-                Connecting to SoloKeys…
+                Connecting to Solo 2…
             </p>
             <div id="messageArea"></div>
         </div>
@@ -430,7 +431,7 @@
                     <label>Secret Key</label>
                     <div class="secret-input-group">
                         <input type="text" id="credSecret" placeholder="Base32 encoded secret (e.g., JBSWY3DPEHPK3PXP)">
-                        <button class="btn btn-secondary scan-btn" id="scanQrBtn">🔍 Find QR on Page</button>
+                        <button class="btn btn-secondary scan-btn" id="scanQrBtn">📤 Upload QR Image</button>
                     </div>
                     <p class="help-text">Enter the secret key or find a QR code on any open page</p>
                 </div>

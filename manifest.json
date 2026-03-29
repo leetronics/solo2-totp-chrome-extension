@@ -28,16 +28,33 @@
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {
-      "16": "icons/icon-16.png",
-      "48": "icons/icon-48.png",
-      "128": "icons/icon-128.png"
-    }
+      "16": "icons/new-logo-16.png",
+      "48": "icons/new-logo-48.png",
+      "128": "icons/new-logo-128.png"
+    },
+    "theme_icons": [
+      {
+        "dark": "icons/new-logo-16.png",
+        "light": "icons/new-logo-16.png",
+        "size": 16
+      },
+      {
+        "dark": "icons/new-logo-48.png",
+        "light": "icons/new-logo-48.png",
+        "size": 48
+      },
+      {
+        "dark": "icons/new-logo-128.png",
+        "light": "icons/new-logo-128.png",
+        "size": 128
+      }
+    ]
   },
   "options_page": "options/options.html",
   "icons": {
-    "16": "icons/icon-16.png",
-    "48": "icons/icon-48.png",
-    "128": "icons/icon-128.png"
+    "16": "icons/new-logo-16.png",
+    "48": "icons/new-logo-48.png",
+    "128": "icons/new-logo-128.png"
   },
   "web_accessible_resources": [
     {

@@ -111,14 +111,14 @@ function updateConnectionStatus(connected, count) {
 
     if (connected) {
         indicator.classList.add('connected');
-        statusText.textContent = `SoloKey connected • ${count} credential${count !== 1 ? 's' : ''}`;
+        statusText.textContent = `Solo 2 connected • ${count} credential${count !== 1 ? 's' : ''}`;
         connectBtn.style.display = 'none';
         if (helpText) helpText.style.display = 'none';
         isConnected = true;
     } else {
         indicator.classList.remove('connected');
-        statusText.textContent = 'SoloKey not connected';
-        connectBtn.textContent = 'Connect to SoloKey';
+        statusText.textContent = 'Solo 2 not connected';
+        connectBtn.textContent = 'Connect to Solo 2';
         connectBtn.style.display = 'block';
         isConnected = false;
     }
@@ -132,7 +132,7 @@ async function handleConnect() {
     connectBtn.disabled = true;
     if (helpText) {
         helpText.style.display = 'block';
-        helpText.textContent = 'Connecting to SoloKeys…';
+            helpText.textContent = 'Connecting to Solo 2…';
     }
 
     try {
@@ -166,7 +166,7 @@ async function connectToDevice() {
         isConnected = true;
         updateConnectionStatus(true, credentials.length);
         renderCredentialList();
-        showMessage('SoloKey connected!', 'success');
+        showMessage('Solo 2 connected!', 'success');
 
         // Sync state to background
         await chrome.runtime.sendMessage({
@@ -176,10 +176,10 @@ async function connectToDevice() {
             pinVerified: false
         });
     } catch (error) {
-        console.error('Failed to connect to SoloKeys GUI:', error);
+        console.error('Failed to connect to Solo 2:', error);
         showMessage('Failed to connect: ' + error.message, 'error');
         const connectBtn = document.getElementById('connectBtn');
-        connectBtn.textContent = 'Connect to SoloKey';
+        connectBtn.textContent = 'Connect to Solo 2';
         isConnected = false;
     }
 }
@@ -242,7 +242,7 @@ async function deleteCredential(name) {
     if (!confirmed) return;
 
     if (!device) {
-        showMessage('SoloKey not connected', 'error');
+        showMessage('Solo 2 not connected', 'error');
         return;
     }
 
@@ -304,7 +304,7 @@ async function handleAddCredential() {
     }
 
     if (!device) {
-        showMessage('SoloKey not connected', 'error');
+        showMessage('Solo 2 not connected', 'error');
         return;
     }
 
@@ -363,51 +363,69 @@ function clearAddForm() {
 async function handleScanQR() {
     const scanBtn = document.getElementById('scanQrBtn');
 
-    scanBtn.textContent = 'Scanning...';
+    scanBtn.textContent = 'Loading...';
     scanBtn.disabled = true;
 
     try {
-        // Query all tabs to find QR codes
-        const tabs = await chrome.tabs.query({});
-        let allResults = [];
-        let scannedTabs = 0;
-        let accessibleTabs = 0;
+        // Create hidden file input for image upload
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.style.display = 'none';
+        document.body.appendChild(fileInput);
 
-        for (const tab of tabs) {
-            // Skip invalid pages
-            if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://'))) {
-                continue;
-            }
-            accessibleTabs++;
-
-            try {
-                const response = await chrome.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
-                if (response?.results?.length > 0) {
-                    allResults = allResults.concat(response.results.map(r => ({ ...r, tabTitle: tab.title, tabId: tab.id })));
+        const filePromise = new Promise((resolve) => {
+            fileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) {
+                    resolve(null);
+                    return;
                 }
-                scannedTabs++;
-            } catch (e) {
-                // Tab may not have content script or be accessible, skip
-                continue;
-            }
+
+                try {
+                    const img = new Image();
+                    img.src = URL.createObjectURL(file);
+                    await new Promise((r) => img.onload = r);
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+                    if (typeof jsQR !== 'undefined') {
+                        const code = jsQR(imageData.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
+                        if (code) {
+                            resolve([{ data: code.data, source: 'upload' }]);
+                            return;
+                        }
+                    }
+                    resolve([]);
+                } catch (err) {
+                    console.error('Error reading image:', err);
+                    resolve([]);
+                }
+            });
+            fileInput.click();
+        });
+
+        const results = await filePromise;
+        document.body.removeChild(fileInput);
+
+        if (results && results.length > 0) {
+            showQRCodeSelector(results);
+            scanBtn.disabled = false;
+            scanBtn.textContent = '📤 Upload QR Image';
+            return;
         }
 
-        if (allResults.length === 0) {
-            if (accessibleTabs === 0) {
-                showMessage('No accessible tabs found. Please open a website first.', 'info');
-            } else if (scannedTabs === 0) {
-                showMessage('Could not scan any tabs. Try refreshing the pages first.', 'info');
-            } else {
-                showMessage('No QR codes found on any open page', 'info');
-            }
-        } else {
-            showQRCodeSelector(allResults);
-        }
+        showMessage('No QR code found in image. Try scanning a page instead.', 'info');
     } catch (error) {
         console.error('Scan error:', error);
         showMessage('Failed to scan: ' + error.message, 'error');
     } finally {
-        scanBtn.textContent = '🔍 Find QR on Page';
+        scanBtn.textContent = '📤 Upload QR Image';
         scanBtn.disabled = false;
     }
 }
@@ -535,7 +553,7 @@ async function handleSetPIN() {
     }
 
     if (!device) {
-        showMessage('SoloKey not connected', 'error');
+        showMessage('Solo 2 not connected', 'error');
         return;
     }
 
@@ -567,7 +585,7 @@ async function handleChangePIN() {
     }
 
     if (!device) {
-        showMessage('SoloKey not connected', 'error');
+        showMessage('Solo 2 not connected', 'error');
         return;
     }
 

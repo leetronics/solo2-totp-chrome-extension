@@ -448,10 +448,10 @@
         
         <!-- Device Connection -->
         <div class="device-section" id="deviceSection">
-            <p id="deviceStatus">SoloKey not connected</p>
-            <button class="btn" id="connectBtn">Connect to SoloKey</button>
+            <p id="deviceStatus">Solo 2 not connected</p>
+            <button class="btn" id="connectBtn">Connect to Solo 2</button>
             <p id="connectHelp" style="font-size: 11px; color: #888; margin-top: 8px; display: none;">
-                Connecting to SoloKeys…
+                Connecting to Solo 2…
             </p>
         </div>
         
@@ -468,6 +468,16 @@
                 </div>
                 <div class="form-group">
                     <input type="text" id="quickCredSecret" placeholder="Secret key (Base32)" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 8px;">
+                </div>
+                <div class="checkbox-group" style="margin-bottom: 8px;">
+                    <label class="checkbox-item" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px;">
+                        <input type="checkbox" id="quickCredTouch" style="width: 16px; height: 16px;">
+                        <span>Require Touch</span>
+                    </label>
+                    <label class="checkbox-item" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px;">
+                        <input type="checkbox" id="quickCredPin" style="width: 16px; height: 16px;">
+                        <span>PIN Protected</span>
+                    </label>
                 </div>
                 <div style="display: flex; gap: 8px;">
                     <button class="btn btn-small" id="scanQrBtn" style="flex: 1;">🔍 Find QR on Page</button>
@@ -536,7 +546,7 @@
     <div class="touch-overlay hidden" id="touchOverlay">
         <div class="touch-icon">👆</div>
         <h2>Touch Required</h2>
-        <p>Please press the button on your SoloKeys</p>
+        <p>Please press the button on your Solo 2</p>
     </div>
     
     <script src="../lib/jsqr.js"></script>

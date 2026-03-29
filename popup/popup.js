@@ -103,19 +103,19 @@ function updateConnectionStatus(connected, count, isCached = false) {
 
     if (connected) {
         indicator.classList.add('connected');
-        statusText.textContent = `SoloKey connected • ${count} credentials`;
+        statusText.textContent = `Solo 2 connected • ${count} credentials`;
         connectBtn.style.display = 'none';
         isConnected = true;
     } else if (isCached) {
         indicator.classList.remove('connected');
         statusText.textContent = `Cached • ${count} credentials`;
-        connectBtn.textContent = 'Connect to SoloKey';
+        connectBtn.textContent = 'Connect to Solo 2';
         connectBtn.style.display = 'block';
         isConnected = false;
     } else {
         indicator.classList.remove('connected');
-        statusText.textContent = 'SoloKey not connected';
-        connectBtn.textContent = 'Connect to SoloKey';
+        statusText.textContent = 'Solo 2 not connected';
+        connectBtn.textContent = 'Connect to Solo 2';
         connectBtn.style.display = 'block';
         isConnected = false;
     }
@@ -128,7 +128,7 @@ async function handleConnect() {
     connectBtn.textContent = 'Connecting...';
     connectBtn.disabled = true;
     helpText.style.display = 'block';
-    helpText.textContent = 'Connecting to SoloKeys…';
+    helpText.textContent = 'Connecting to Solo 2…';
 
     try {
         await connectToDevice(false);
@@ -140,8 +140,8 @@ async function handleConnect() {
         helpText.style.display = 'block';
         helpText.textContent = error.message?.includes('ative host')
             ? 'Native messaging host not found — install it via SoloKeys GUI → Settings → Browser.'
-            : 'Click to try again';
-        connectBtn.textContent = 'Connect to SoloKey';
+                : 'Click to try again';
+        connectBtn.textContent = 'Connect to Solo 2';
         connectBtn.disabled = false;
     }
 }
@@ -171,7 +171,7 @@ async function connectToDevice(silent = false) {
     renderCredentials();
 
     if (!silent) {
-        showMessage('SoloKey connected!', 'success');
+        showMessage('Solo 2 connected!', 'success');
     }
 }
 
@@ -181,10 +181,10 @@ async function generateOTP(credential, action = 'display') {
     if (!isConnected || !device) {
         // Try to connect first
         try {
-            showMessage('Connecting to SoloKey...', 'info');
+            showMessage('Connecting to Solo 2...', 'info');
             await connectToDevice();
         } catch (error) {
-            showMessage('Insert your SoloKey to generate a code', 'info');
+            showMessage('Insert your Solo 2 to generate a code', 'info');
             return;
         }
     }
@@ -316,14 +316,14 @@ function renderCredentials() {
         list.innerHTML = `
             <div class="empty-state">
                 <div class="empty-state-icon">🔑</div>
-                <p>${isConnected ? 'No credentials found' : 'Insert your SoloKey to see credentials'}</p>
+                <p>${isConnected ? 'No credentials found' : 'Insert your Solo 2 to see credentials'}</p>
                 ${isConnected ? '<button class="btn" id="addFirstCredBtn" style="margin-top: 8px;">Add Credential</button>' : ''}
             </div>
         `;
         document.getElementById('addFirstCredBtn')?.addEventListener('click', handleOpenOptions);
     } else {
         const cachedBanner = cached
-            ? '<div class="message info" style="margin:0 0 8px;">Showing cached credentials — insert your SoloKey to generate codes</div>'
+            ? '<div class="message info" style="margin:0 0 8px;">Showing cached credentials — insert your Solo 2 to generate codes</div>'
             : '';
         list.innerHTML = cachedBanner + credentials.map(cred =>
             createCredentialItem(cred, matchingCredentials.some(m => m.name === cred.name), cached)
@@ -341,7 +341,7 @@ function attachCredentialHandlers(container, credList, cached) {
         el.addEventListener('click', (e) => {
             if (e.target.closest('.btn-row')) return;
             if (cached) {
-                showMessage('Insert your SoloKey to generate a code', 'info');
+                showMessage('Insert your Solo 2 to generate a code', 'info');
             } else {
                 generateOTP(cred, 'display');
             }
@@ -539,6 +539,8 @@ async function handleQuickAddCredential() {
     const domain = document.getElementById('quickCredDomain').value.trim();
     const username = document.getElementById('quickCredUsername').value.trim();
     const secretInput = document.getElementById('quickCredSecret');
+    const touchRequired = document.getElementById('quickCredTouch').checked;
+    const pinProtected = document.getElementById('quickCredPin').checked;
 
     if (!domain) {
         showMessage('No domain — open the popup on a website first', 'error');
@@ -556,10 +558,10 @@ async function handleQuickAddCredential() {
     // Ensure we're connected
     if (!isConnected || !device) {
         try {
-            showMessage('Connecting to SoloKey...', 'info');
+            showMessage('Connecting to Solo 2...', 'info');
             await connectToDevice();
         } catch (error) {
-            showMessage('Please insert your SoloKey first', 'error');
+            showMessage('Please insert your Solo 2 first', 'error');
             return;
         }
     }
@@ -574,11 +576,13 @@ async function handleQuickAddCredential() {
     }
     
     try {
-        const result = await device.addCredential(name, secretBytes, 'TOTP', 'SHA1', 6, {});
+        const result = await device.addCredential(name, secretBytes, 'TOTP', 'SHA1', 6, { touchRequired, pinProtected });
         if (result.success) {
             showMessage('Credential added successfully!', 'success');
             document.getElementById('quickCredUsername').value = '';
             secretInput.value = '';
+            document.getElementById('quickCredTouch').checked = false;
+            document.getElementById('quickCredPin').checked = false;
             toggleQuickAdd();
             
             // Refresh credentials list
