@@ -69,9 +69,7 @@ function validateExtension() {
         'popup/popup.js',
         'content/content.js',
         'lib/ctaphid.js',
-        'lib/apdu.js',
-        'lib/tlv.js',
-        'lib/oath.js',
+        'lib/native-transport.js',
         'lib/utils.js',
         'icons/icon.svg',
         'icons/icon-16.png',
@@ -375,9 +373,7 @@ dist/
 │   └── content.js
 ├── lib/
 │   ├── ctaphid.js
-│   ├── apdu.js
-│   ├── tlv.js
-│   ├── oath.js
+│   ├── native-transport.js
 │   └── utils.js
 ├── icons/
 │   ├── icon.svg

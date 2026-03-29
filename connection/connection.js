@@ -3,10 +3,8 @@
 // This window stays open to maintain the device connection
 
 import CCIDTransport from '../lib/ccid.js';
-import OATHProtocol from '../lib/oath.js';
 
 let device = null;
-let oath = null;
 let isConnected = false;
 
 // UI Elements
@@ -62,53 +60,15 @@ async function handlePopupMessage(request, sender) {
 }
 
 async function getCredentialCount() {
-    if (!isConnected || !oath) return 0;
-    try {
-        const creds = await oath.listCredentials();
-        return creds.length;
-    } catch (e) {
-        return 0;
-    }
+    return 0;
 }
 
 async function handleGenerateOTP(credentialName) {
-    if (!isConnected || !oath) {
-        return { success: false, error: 'Device not connected' };
-    }
-    
-    try {
-        const otp = await oath.calculateOTP(credentialName);
-        return { success: true, otp };
-    } catch (error) {
-        if (error.type === 'TOUCH_REQUIRED') {
-            return { 
-                success: false, 
-                touchRequired: true,
-                message: 'Touch required on device'
-            };
-        }
-        if (error.type === 'PIN_REQUIRED') {
-            return { 
-                success: false, 
-                pinRequired: true,
-                message: 'PIN verification required'
-            };
-        }
-        return { success: false, error: error.message };
-    }
+    return { success: false, error: 'Use native transport path' };
 }
 
 async function handleVerifyPIN(pin) {
-    if (!isConnected || !oath) {
-        return { success: false, message: 'Device not connected' };
-    }
-    
-    try {
-        const result = await oath.verifyPIN(pin);
-        return result;
-    } catch (error) {
-        return { success: false, message: error.message };
-    }
+    return { success: false, message: 'Use native transport path' };
 }
 
 async function checkWebHIDSupport() {
@@ -191,22 +151,8 @@ async function handleConnect() {
         console.log('Device connected successfully');
         isConnected = true;
         
-        // Create OATH protocol handler
-        oath = new OATHProtocol(device);
-        
-        // Try to list credentials to verify connection
-        updateStatus('Reading credentials...', 'info');
-        let credentials = [];
-        try {
-            credentials = await oath.listCredentials();
-            console.log('Found credentials:', credentials.length);
-        } catch (credError) {
-            console.warn('Could not list credentials:', credError);
-            // This is okay - device might not have credentials yet
-        }
-        
         // Update background script with connection state
-        await updateBackgroundState(true, credentials, oath.pinVerified);
+        await updateBackgroundState(true, [], false);
         
         // Show success
         showSuccess(credentials.length);

@@ -2,12 +2,10 @@
 // Popup UI logic for SoloKeys TOTP extension
 
 import NativeTransport from '../lib/native-transport.js';
-import OATHProtocol from '../lib/oath.js';
 import { matchesSite } from '../lib/utils.js';
 
 // Global state
 let device = null;
-let oath = null;
 let credentials = [];
 let matchingCredentials = [];
 let currentOTP = null;
@@ -19,6 +17,7 @@ let pendingAction = 'display'; // 'display' | 'copy' | 'type'
 let isSyncing = false;
 let currentHostname = '';
 let foundQRCodes = [];
+let approvalPoller = null;
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
@@ -69,29 +68,53 @@ function isCachedWhileOffline() {
     return !isConnected && credentials.length > 0;
 }
 
+function startApprovalPoller() {
+    if (approvalPoller) return;
+    approvalPoller = setInterval(async () => {
+        try {
+            await connectToDevice(true);
+            stopApprovalPoller();
+        } catch (e) {
+            if (!e.message?.includes('Waiting for SoloKeys GUI confirmation')) {
+                stopApprovalPoller();
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('connectBtn').textContent = 'Connect to SoloKeys GUI';
+                const helpText = document.getElementById('connectHelp');
+                helpText.style.display = 'none';
+            }
+        }
+    }, 2000);
+}
+
+function stopApprovalPoller() {
+    if (approvalPoller) { clearInterval(approvalPoller); approvalPoller = null; }
+    chrome.storage.local.remove(['pendingPairing']);
+}
+
 async function silentConnect() {
-    // Only try to connect if not already connected
     if (isConnected || isSyncing) return;
 
-    // Check if we should auto-connect (were connected recently)
-    const stored = await chrome.storage.local.get(['connectionState']);
-    const shouldAutoConnect = stored.connectionState?.wasConnected &&
-        stored.connectionState?.lastConnected &&
-        (Date.now() - stored.connectionState.lastConnected) < 300000; // 5 minutes
+    // If a pairing approval is already in progress, resume polling
+    const stored = await chrome.storage.local.get(['pendingPairing']);
+    if (stored.pendingPairing) {
+        startApprovalPoller();
+        return;
+    }
 
-    if (shouldAutoConnect) {
-        try {
-            isSyncing = true;
-            await connectToDevice(true); // silent mode
-        } catch (error) {
-            console.log('Silent connect failed:', error.message);
-            // If waiting for confirmation, don't treat as error
-            if (error.message && error.message.includes('Waiting for SoloKeys GUI confirmation')) {
-                console.log('Waiting for SoloKeys GUI confirmation - will retry on next user action');
-            }
-        } finally {
-            isSyncing = false;
+    // Always attempt a silent connect — connect() fails fast (3 s) when the
+    // GUI is not running, so this never hangs the popup noticeably.
+    try {
+        isSyncing = true;
+        await connectToDevice(true);
+    } catch (error) {
+        if (error.message?.includes('Waiting for SoloKeys GUI confirmation')) {
+            // GUI showed the pairing dialog — persist and start polling
+            await chrome.storage.local.set({ pendingPairing: true });
+            startApprovalPoller();
         }
+        // Any other error (GUI not running): fail silently, show Connect button
+    } finally {
+        isSyncing = false;
     }
 }
 
@@ -151,14 +174,14 @@ async function handleConnect() {
         helpText.style.display = 'none';
     } catch (error) {
         console.error('Connection error:', error);
-        
-        // Check if this is a "waiting for confirmation" error
-        if (error.message && error.message.includes('Waiting for SoloKeys GUI confirmation')) {
-            showMessage('Please approve the connection in SoloKeys GUI, then click Connect again', 'info');
+
+        if (error.message?.includes('Waiting for SoloKeys GUI confirmation')) {
+            showMessage('Approve the connection request in SoloKeys GUI…', 'info');
             helpText.style.display = 'block';
-            helpText.textContent = 'Waiting for approval... Click Connect again after approving in SoloKeys GUI';
-            connectBtn.textContent = 'Connect to SoloKeys GUI';
-            connectBtn.disabled = false;
+            helpText.textContent = 'Waiting for approval in SoloKeys GUI…';
+            // Don't re-enable button — stay in "Connecting…" state
+            await chrome.storage.local.set({ pendingPairing: true });
+            startApprovalPoller();
         } else {
             showMessage('Connection failed: ' + error.message, 'error');
             updateConnectionStatus(false, credentials.length, isCachedWhileOffline());
@@ -183,23 +206,23 @@ async function connectToDevice(silent = false) {
         throw error;
     }
 
-    oath = new OATHProtocol(device);
-
     let creds = [];
     try {
-        creds = await oath.listCredentials();
+        creds = await device.listCredentials();
     } catch (e) {
         console.warn('Could not list credentials:', e);
     }
 
     credentials = creds;
     isConnected = true;
+    chrome.storage.local.remove(['pendingPairing']);
+    stopApprovalPoller();
 
     await chrome.runtime.sendMessage({
         action: 'updateDeviceState',
         connected: true,
         credentials: creds,
-        pinVerified: oath.pinVerified
+        pinVerified: false
     });
 
     updateConnectionStatus(true, creds.length);
@@ -213,7 +236,7 @@ async function connectToDevice(silent = false) {
 // Generate OTP then execute the requested action.
 // action: 'display' (show in panel) | 'copy' (to clipboard) | 'type' (fill page)
 async function generateOTP(credential, action = 'display') {
-    if (!isConnected || !oath) {
+    if (!isConnected || !device) {
         // Try to connect first
         try {
             showMessage('Connecting to SoloKeys GUI...', 'info');
@@ -229,7 +252,7 @@ async function generateOTP(credential, action = 'display') {
     pendingAction = action;
 
     try {
-        const otp = await oath.calculateOTP(credential.name);
+        const otp = await device.calculateOTP(credential.name);
         executeOTPAction(otp, credential, action);
     } catch (error) {
         if (error.type === 'TOUCH_REQUIRED') {
@@ -252,22 +275,46 @@ function executeOTPAction(otp, credential, action) {
             .then(() => showMessage('Code copied to clipboard', 'success'))
             .catch(() => showMessage('Failed to copy', 'error'));
     } else if (action === 'type') {
-        chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-            if (!tab) {
-                showMessage('No active tab', 'error');
-                return;
+        chrome.tabs.query({ active: true, currentWindow: true }, async ([tab]) => {
+            if (!tab) { showMessage('No active tab', 'error'); return; }
+
+            let typed = false;
+            try {
+                // executeScript transfers DOM focus properly before running, unlike
+                // sendMessage which fires while the popup still owns window focus.
+                const [result] = await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    // Runs in the tab — data-solokeys-focus marks the last field the
+                    // user touched, set by the content script's focusin listener.
+                    func: (otp) => {
+                        const el = document.querySelector('[data-solokeys-focus]');
+                        if (!el) return false;
+                        el.focus();
+                        // execCommand now works because the tab has focus
+                        if (document.execCommand('insertText', false, otp)) return true;
+                        // execCommand not available (sandboxed / non-editable) — fall back
+                        const proto = el instanceof HTMLTextAreaElement
+                            ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                        if (setter) setter.call(el, el.value + otp);
+                        else el.value += otp;
+                        el.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: otp, bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
+                    },
+                    args: [otp]
+                });
+                typed = result?.result === true;
+            } catch (_) { /* scripting not permitted on this page */ }
+
+            if (typed) {
+                showMessage('Code typed!', 'success');
+                setTimeout(() => window.close(), 600);
+            } else {
+                navigator.clipboard.writeText(otp)
+                    .then(() => showMessage('No focused field — code copied to clipboard', 'info'))
+                    .catch(() => showMessage('Failed to copy', 'error'));
             }
-            chrome.tabs.sendMessage(tab.id, { action: 'fillOTP', otp }, (response) => {
-                if (chrome.runtime.lastError || !response?.success) {
-                    // Fallback: copy to clipboard
-                    navigator.clipboard.writeText(otp)
-                        .then(() => showMessage('No OTP field found — code copied instead', 'info'))
-                        .catch(() => showMessage('Failed to copy', 'error'));
-                } else {
-                    showMessage('Code typed!', 'success');
-                    setTimeout(() => window.close(), 600);
-                }
-            });
         });
     } else {
         displayOTP(otp, credential);
@@ -282,7 +329,7 @@ async function pollForTouch(credentialName) {
         attempts++;
         try {
             await new Promise(resolve => setTimeout(resolve, 1000));
-            const otp = await oath.calculateOTP(credentialName);
+            const otp = await device.calculateOTP(credentialName);
             hideTouchOverlay();
             executeOTPAction(otp, currentCredential, pendingAction);
         } catch (error) {
@@ -376,6 +423,11 @@ function createCredentialItem(cred, isMatching, isCached = false) {
     if (cred.pinEncrypted) badges.push('<span class="badge pin">PIN</span>');
     if (isCached) badges.push('<span class="badge">Cached</span>');
 
+    const { domain, username } = parseCredentialName(cred.name);
+    const nameHtml = username
+        ? `<span class="cred-domain">${escapeHtml(domain)}</span><span class="cred-sep">:</span><span class="cred-username">${escapeHtml(username)}</span>`
+        : `<span class="cred-domain">${escapeHtml(domain)}</span>`;
+
     const actionButtons = isCached ? '' : `
         <button class="btn-row type-btn" title="Type into focused field">Type</button>
         <button class="btn-row copy-btn" title="Copy to clipboard">Copy</button>
@@ -385,7 +437,7 @@ function createCredentialItem(cred, isMatching, isCached = false) {
         <div class="credential-item ${isMatching ? 'matching' : ''}" data-name="${escapeHtml(cred.name)}">
             <div style="min-width:0; flex:1;">
                 ${badges.length ? `<div class="credential-badges">${badges.join('')}</div>` : ''}
-                <div class="credential-name">${escapeHtml(cred.name)}</div>
+                <div class="credential-name">${nameHtml}</div>
                 <div class="credential-type">${cred.type} • ${cred.algorithm}</div>
             </div>
             <div class="credential-actions">
@@ -397,7 +449,23 @@ function createCredentialItem(cred, isMatching, isCached = false) {
 
 function displayOTP(otp, credential) {
     currentOTP = otp;
-    document.getElementById('otpCredentialName').textContent = credential.name;
+    const { domain, username } = parseCredentialName(credential.name);
+    const nameEl = document.getElementById('otpCredentialName');
+    nameEl.textContent = '';
+    const domainSpan = document.createElement('span');
+    domainSpan.className = 'cred-domain';
+    domainSpan.textContent = domain;
+    nameEl.appendChild(domainSpan);
+    if (username) {
+        const sep = document.createElement('span');
+        sep.className = 'cred-sep';
+        sep.textContent = ':';
+        const userSpan = document.createElement('span');
+        userSpan.className = 'cred-username';
+        userSpan.textContent = username;
+        nameEl.appendChild(sep);
+        nameEl.appendChild(userSpan);
+    }
     document.getElementById('otpCode').textContent = otp;
     document.getElementById('otpSection').classList.remove('hidden');
     startOTPTimer();
@@ -453,10 +521,10 @@ function hidePinModal() {
 
 async function handlePinSubmit() {
     const pin = document.getElementById('pinInput').value;
-    if (!pin || !oath) return;
+    if (!pin || !device) return;
 
     try {
-        const result = await oath.verifyPIN(pin);
+        const result = await device.verifyPIN(pin);
 
         if (result.success) {
             hidePinModal();
@@ -509,17 +577,15 @@ function toggleQuickAdd() {
     if (form.classList.contains('hidden')) {
         form.classList.remove('hidden');
         btn.textContent = '− Cancel';
-        
-        // Pre-fill credential name with current site
-        const nameInput = document.getElementById('quickCredName');
-        if (currentHostname && !nameInput.value) {
-            // Extract domain name without TLD
-            const parts = currentHostname.split('.');
-            const siteName = parts.length > 1 ? parts[parts.length - 2] : parts[0];
-            nameInput.value = siteName.charAt(0).toUpperCase() + siteName.slice(1);
-            nameInput.focus();
-            nameInput.select();
-        }
+
+        // Set domain from current site (read-only)
+        const domainInput = document.getElementById('quickCredDomain');
+        domainInput.value = currentHostname || '';
+
+        // Clear username and focus it
+        const usernameInput = document.getElementById('quickCredUsername');
+        usernameInput.value = '';
+        usernameInput.focus();
     } else {
         form.classList.add('hidden');
         btn.textContent = '+ Add Credential for This Site';
@@ -528,16 +594,17 @@ function toggleQuickAdd() {
 }
 
 async function handleQuickAddCredential() {
-    const nameInput = document.getElementById('quickCredName');
+    const domain = document.getElementById('quickCredDomain').value.trim();
+    const username = document.getElementById('quickCredUsername').value.trim();
     const secretInput = document.getElementById('quickCredSecret');
-    
-    const name = nameInput.value.trim();
-    const secret = secretInput.value.trim();
-    
-    if (!name) {
-        showMessage('Please enter a credential name', 'error');
+
+    if (!domain) {
+        showMessage('No domain — open the popup on a website first', 'error');
         return;
     }
+
+    const name = username ? `${domain}:${username}` : domain;
+    const secret = secretInput.value.trim();
     
     if (!secret) {
         showMessage('Please enter or scan a secret key', 'error');
@@ -545,7 +612,7 @@ async function handleQuickAddCredential() {
     }
     
     // Ensure we're connected
-    if (!isConnected || !oath) {
+    if (!isConnected || !device) {
         try {
             showMessage('Connecting to SoloKeys GUI...', 'info');
             await connectToDevice();
@@ -565,10 +632,10 @@ async function handleQuickAddCredential() {
     }
     
     try {
-        const result = await oath.addCredential(name, secretBytes, 'TOTP', 'SHA1', 6, {});
+        const result = await device.addCredential(name, secretBytes, 'TOTP', 'SHA1', 6, {});
         if (result.success) {
             showMessage('Credential added successfully!', 'success');
-            nameInput.value = '';
+            document.getElementById('quickCredUsername').value = '';
             secretInput.value = '';
             toggleQuickAdd();
             
@@ -587,14 +654,14 @@ async function handleQuickAddCredential() {
 }
 
 async function loadCredentialsFromDevice() {
-    if (!oath) return;
+    if (!device) return;
     try {
-        credentials = await oath.listCredentials();
+        credentials = await device.listCredentials();
         await chrome.runtime.sendMessage({
             action: 'updateDeviceState',
             connected: true,
             credentials,
-            pinVerified: oath.pinVerified
+            pinVerified: false
         });
         renderCredentials();
         updateConnectionStatus(true, credentials.length);
@@ -690,7 +757,8 @@ async function handleScanPageForQR() {
                     const parsed = parseOTPAuthURL(qr.url);
 
                     if (parsed) {
-                        document.getElementById('quickCredName').value = parsed.label || parsed.issuer || '';
+                        // Domain stays fixed; fill username from QR account name
+                        document.getElementById('quickCredUsername').value = parsed.label || '';
                         document.getElementById('quickCredSecret').value = parsed.secret || '';
                         resultsDiv.style.display = 'none';
                         showMessage('QR code selected!', 'success');
@@ -767,6 +835,13 @@ function base32Decode(str) {
     }
     
     return new Uint8Array(bytes);
+}
+
+// Split "domain:username" into parts. Domain is everything before the first colon.
+function parseCredentialName(name) {
+    const idx = name.indexOf(':');
+    if (idx === -1) return { domain: name, username: '' };
+    return { domain: name.slice(0, idx), username: name.slice(idx + 1) };
 }
 
 function escapeHtml(text) {

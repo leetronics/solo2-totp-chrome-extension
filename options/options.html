@@ -489,11 +489,11 @@
                 
                 <div class="form-group">
                     <label class="checkbox-item">
-                        <input type="checkbox" id="autoCopy">
-                        <span>Auto-copy OTP to clipboard when generated</span>
+                        <input type="checkbox" id="autoDetectOTP">
+                        <span>Enable autofill detection of OTP fields</span>
                     </label>
                 </div>
-                
+
                 <div class="form-group">
                     <label class="checkbox-item">
                         <input type="checkbox" id="showNotifications">
@@ -532,8 +532,7 @@
         </div>
     </div>
     
-    <!-- Load QR code library from CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <script src="../lib/jsqr.js"></script>
     <script type="module" src="options.js"></script>
 </body>
 </html>

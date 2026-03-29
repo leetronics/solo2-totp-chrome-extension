@@ -157,7 +157,18 @@
             font-weight: 500;
             color: #333;
         }
-        
+        .cred-domain {
+            color: #333;
+        }
+        .cred-sep {
+            color: #bbb;
+            margin: 0 1px;
+        }
+        .cred-username {
+            color: #888;
+            font-weight: 400;
+        }
+
         .credential-type {
             font-size: 11px;
             color: #888;
@@ -450,8 +461,10 @@
                 + Add Credential for This Site
             </button>
             <div id="quickAddForm" class="hidden">
-                <div class="form-group">
-                    <input type="text" id="quickCredName" placeholder="Credential name (e.g., GitHub)" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 8px;">
+                <div class="form-group" style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px;">
+                    <input type="text" id="quickCredDomain" readonly style="flex: 1; min-width: 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #f0f0f0; color: #555; font-size: 12px;">
+                    <span style="color: #999; font-weight: bold; flex-shrink: 0;">:</span>
+                    <input type="text" id="quickCredUsername" placeholder="username (optional)" style="flex: 1.4; min-width: 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;">
                 </div>
                 <div class="form-group">
                     <input type="text" id="quickCredSecret" placeholder="Secret key (Base32)" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 8px;">
@@ -526,7 +539,7 @@
         <p>Please press the button on your SoloKeys</p>
     </div>
     
-    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <script src="../lib/jsqr.js"></script>
     <script src="popup.js" type="module"></script>
 </body>
 </html>

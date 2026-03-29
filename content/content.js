@@ -4,6 +4,7 @@
 let detectedOTPFields = [];
 let matchingCredentials = [];
 let hasRequestedCredentials = false;
+let lastFocusedInput = null;
 
 // Initialize on page load
 if (document.readyState === 'loading') {
@@ -12,19 +13,38 @@ if (document.readyState === 'loading') {
     initialize();
 }
 
-function initialize() {
+async function initialize() {
     // Report current site to background script
     reportSite();
-    
-    // Detect OTP fields
-    detectOTPFields();
-    
-    // Request matching credentials from background
-    requestMatchingCredentials();
-    
-    // Listen for changes (dynamic content)
-    observeDOM();
-    
+
+    // Check autoDetectOTP setting before running field detection
+    const { autoDetectOTP = true } = await chrome.storage.local.get({ autoDetectOTP: true });
+    if (autoDetectOTP) {
+        // Detect OTP fields
+        detectOTPFields();
+
+        // Request matching credentials from background
+        requestMatchingCredentials();
+
+        // Listen for changes (dynamic content)
+        observeDOM();
+    }
+
+    // Track last focused editable element for the Type button.
+    // We mark the element with a data attribute so popup's executeScript can
+    // find it without depending on the content script's in-memory state.
+    document.addEventListener('focusin', (e) => {
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
+                  t.isContentEditable || t.getAttribute('contenteditable') != null)) {
+            if (lastFocusedInput && lastFocusedInput !== t) {
+                delete lastFocusedInput.dataset.solokeysFocus;
+            }
+            lastFocusedInput = t;
+            t.dataset.solokeysFocus = '1';
+        }
+    }, true);
+
     // Listen for messages from background/popup
     chrome.runtime.onMessage.addListener(handleMessage);
 }
@@ -76,214 +96,247 @@ function detectOTPFields() {
 }
 
 function isOTPField(input) {
-    // Check various attributes that indicate an OTP field
     const name = (input.name || '').toLowerCase();
     const id = (input.id || '').toLowerCase();
     const placeholder = (input.placeholder || '').toLowerCase();
     const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
     const autocomplete = (input.getAttribute('autocomplete') || '').toLowerCase();
     const type = input.type || '';
-    
-    // Explicit OTP markers - highest confidence
-    if (autocomplete.includes('one-time')) {
-        return true;
-    }
-    
-    // Common OTP field indicators - more specific matching
+
+    // Check associated <label> text (e.g. "Einmalpasswort (OTP)")
+    const labelEl = input.id
+        ? document.querySelector(`label[for="${CSS.escape(input.id)}"]`)
+        : input.closest('label');
+    const labelText = (labelEl?.textContent || '').toLowerCase();
+
+    // High confidence: explicit autocomplete
+    if (autocomplete.includes('one-time')) return true;
+
     const otpSpecificPatterns = [
-        'otp', '2fa', 'mfa', 'totp', 
+        'otp', '2fa', 'mfa', 'totp',
         'verification code', 'auth code', 'authenticator code'
     ];
-    
-    const hasOtpSpecific = otpSpecificPatterns.some(pattern => 
-        name.includes(pattern) || 
-        id.includes(pattern) || 
+
+    const hasOtpSpecific = otpSpecificPatterns.some(pattern =>
+        name.includes(pattern) ||
+        id.includes(pattern) ||
         placeholder.includes(pattern) ||
-        ariaLabel.includes(pattern)
+        ariaLabel.includes(pattern) ||
+        labelText.includes(pattern)
     );
-    
-    // Less reliable patterns - require additional context
+
     const otpGeneralPatterns = [
-        'code', 'token', 
+        'code', 'token',
         'verification', 'auth', 'authenticator', 'security'
     ];
-    
-    const hasOtpGeneral = otpGeneralPatterns.some(pattern => 
-        name.includes(pattern) || 
-        id.includes(pattern) || 
+
+    const hasOtpGeneral = otpGeneralPatterns.some(pattern =>
+        name.includes(pattern) ||
+        id.includes(pattern) ||
         placeholder.includes(pattern) ||
-        ariaLabel.includes(pattern)
+        ariaLabel.includes(pattern) ||
+        labelText.includes(pattern)
     );
-    
-    // Additional checks - must look like an OTP input
-    const isNumericInput = type === 'number' || input.inputMode === 'numeric' || 
-                          (input.getAttribute('pattern') && 
-                           input.getAttribute('pattern').matches(/^[\d]{6,8}$/));
+
+    // Numeric-ish types
+    const isTypedNumeric = type === 'number' || type === 'tel' ||
+        input.inputMode === 'numeric' ||
+        (input.getAttribute('pattern') && /[\d]{6,8}/.test(input.getAttribute('pattern')));
+
+    // type=text is also valid for OTP fields
+    const isTextInput = type === 'text' || type === '' || !type;
+
     const maxLength = input.maxLength;
-    const isCorrectLength = maxLength === 6 || maxLength === 8;
-    
-    // Input characteristics typical for OTP fields
-    const isShortInput = maxLength && maxLength <= 8;
-    const hasTypicalSize = (input.clientWidth && input.clientWidth < 150) || 
-                          (width && width < 150);
-    
-    // High confidence: specific OTP label + numeric + correct length
-    if (hasOtpSpecific && isNumericInput && isCorrectLength) {
-        return true;
-    }
-    
-    // Medium confidence: general OTP label + multiple OTP indicators + correct length
-    if (hasOtpGeneral && isNumericInput && isCorrectLength) {
-        // Check for multiple OTP indicators to reduce false positives
-        const otpIndicatorCount = otpSpecificPatterns.filter(p => 
+    const isCorrectLength = maxLength >= 4 && maxLength <= 8;
+
+    // URL/page context signal
+    const pageIsOTPRelated = /2fa|mfa|otp|totp|verify|authenticate|authenticator/i.test(
+        location.href + document.title
+    );
+
+    // High confidence: specific OTP keyword + right input type
+    // Accept maxLength === -1 (no constraint set) — keyword evidence alone is sufficient
+    if (hasOtpSpecific && (isTypedNumeric || isTextInput) && (isCorrectLength || maxLength === -1)) return true;
+
+    // Medium: on an OTP page + general keyword + short field (or unconstrained length)
+    if (pageIsOTPRelated && hasOtpGeneral && (isCorrectLength || maxLength === -1)) return true;
+
+    // Medium: multiple general OTP indicators
+    if (hasOtpGeneral && (isTypedNumeric || isTextInput) && isCorrectLength) {
+        const count = otpSpecificPatterns.filter(p =>
             name.includes(p) || id.includes(p) || placeholder.includes(p) || ariaLabel.includes(p)
         ).length;
-        
-        return otpIndicatorCount >= 2;
+        return count >= 2;
     }
-    
-    // Low confidence: only use if very specific context
-    // Don't rely on length/numeric alone as it catches too many fields
-    
+
     return false;
 }
 
 function enhanceOTPField(input) {
-    // Don't add indicator if already added
-    if (input.parentElement?.querySelector('.solokeys-indicator')) {
-        return;
-    }
-    
-    // Make input position relative if not already
-    const inputParent = input.parentElement;
-    if (!inputParent) return;
-    
-    if (getComputedStyle(inputParent).position === 'static') {
-        inputParent.style.position = 'relative';
-    }
-    
-    // Always add SoloKeys icon to OTP fields for discovery
-    // Show different states based on whether we have matching credentials
+    if (input.dataset.solokeyEnhanced) return;
+    input.dataset.solokeyEnhanced = 'true';
+
     const hasMatches = matchingCredentials.length > 0;
-    
-    const container = document.createElement('div');
-    container.className = 'solokeys-indicator';
-    container.style.cssText = `
-        position: absolute;
-        right: 8px;
-        top: 50%;
-        transform: translateY(-50%);
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        background: ${hasMatches ? '#667eea' : '#888'};
+
+    const btn = document.createElement('button');
+    btn.className = 'solokeys-autofill-btn';
+    btn.title = hasMatches ? 'Autofill with SoloKeys' : 'No matching SoloKeys credentials';
+    btn.innerHTML = '🔐';
+    btn.style.cssText = `
+        position: fixed;
+        z-index: 2147483647;
+        width: 22px; height: 22px;
+        padding: 0;
+        border: none;
+        border-radius: 3px;
+        background: ${hasMatches ? '#667eea' : '#aaa'};
         color: white;
-        padding: 4px 8px;
-        border-radius: 4px;
         font-size: 12px;
         cursor: pointer;
-        z-index: 1000;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        transition: background 0.2s;
+        line-height: 22px;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        display: flex; align-items: center; justify-content: center;
     `;
-    
-    if (hasMatches) {
-        container.innerHTML = `
-            <span>🔐</span>
-            <span>${matchingCredentials.length} key${matchingCredentials.length > 1 ? 's' : ''}</span>
-        `;
-        container.title = 'Click to fill with SoloKeys';
-    } else {
-        container.innerHTML = `<span>🔐</span>`;
-        container.title = 'No matching SoloKeys credentials for this site';
+
+    function reposition() {
+        const r = input.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) { btn.style.display = 'none'; return; }
+        btn.style.display = 'flex';
+        btn.style.top  = (r.top  + (r.height - 22) / 2) + 'px';
+        btn.style.left = (r.right - 26) + 'px';
     }
-    
-    container.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (hasMatches) {
-            showCredentialSelector(input);
-        } else {
-            showNotification('No matching credentials for this site', 'info');
-            // Open popup to add credentials
-            setTimeout(() => {
-                chrome.runtime.sendMessage({ action: 'openPopup' });
-            }, 500);
-        }
+
+    btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        showCredentialSelector(input);
     });
-    
-    // Hover effects
-    container.addEventListener('mouseenter', () => {
-        container.style.background = hasMatches ? '#5a6fd6' : '#666';
-    });
-    container.addEventListener('mouseleave', () => {
-        container.style.background = hasMatches ? '#667eea' : '#888';
-    });
-    
-    inputParent.appendChild(container);
-    
-    // Add padding to input so text doesn't overlap with indicator
-    input.style.paddingRight = hasMatches ? '70px' : '36px';
+
+    document.body.appendChild(btn);
+    reposition();
+
+    const ro = new ResizeObserver(reposition);
+    ro.observe(input);
+    window.addEventListener('scroll', reposition, { passive: true });
+    window.addEventListener('resize', reposition, { passive: true });
+
+    // Add padding so text doesn't cover icon
+    input.style.paddingRight = (parseInt(getComputedStyle(input).paddingRight) || 0) + 26 + 'px';
+
+    // Store reference for later updates
+    input._solokeyBtn = btn;
 }
 
-function showCredentialSelector(input) {
-    // Remove existing selector
+function parseCredentialName(name) {
+    const idx = name.indexOf(':');
+    if (idx === -1) return { domain: name, username: '' };
+    return { domain: name.slice(0, idx), username: name.slice(idx + 1) };
+}
+
+async function showCredentialSelector(input) {
     const existing = document.querySelector('.solokeys-selector');
     if (existing) existing.remove();
-    
+
+    // Use matching credentials if available, otherwise fetch all
+    let creds = matchingCredentials;
+    let label = 'Matching credentials';
+    if (creds.length === 0) {
+        try {
+            const resp = await chrome.runtime.sendMessage({ action: 'getCredentials' });
+            creds = resp.credentials || [];
+            label = 'All credentials';
+        } catch (_) {}
+    }
+
+    if (creds.length === 0) {
+        chrome.runtime.sendMessage({ action: 'openPopup' });
+        return;
+    }
+
     const selector = document.createElement('div');
     selector.className = 'solokeys-selector';
     selector.style.cssText = `
-        position: absolute;
-        top: 100%;
-        left: 0;
-        right: 0;
+        position: fixed;
         background: white;
         border: 1px solid #ddd;
-        border-radius: 4px;
-        margin-top: 4px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        z-index: 1001;
-        max-height: 200px;
+        border-radius: 6px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+        z-index: 2147483647;
+        min-width: 220px;
+        max-height: 260px;
         overflow-y: auto;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 13px;
     `;
-    
-    selector.innerHTML = matchingCredentials.map(cred => `
-        <div class="solokeys-option" data-name="${escapeHtml(cred.name)}" style="
-            padding: 10px 12px;
+
+    // Header
+    const header = document.createElement('div');
+    header.textContent = label;
+    header.style.cssText = `
+        padding: 6px 12px;
+        font-size: 11px;
+        color: #999;
+        background: #fafafa;
+        border-bottom: 1px solid #eee;
+        border-radius: 6px 6px 0 0;
+        user-select: none;
+    `;
+    selector.appendChild(header);
+
+    creds.forEach(cred => {
+        const { domain, username } = parseCredentialName(cred.name);
+        const option = document.createElement('div');
+        option.className = 'solokeys-option';
+        option.dataset.name = cred.name;
+        option.style.cssText = `
+            padding: 9px 12px;
             cursor: pointer;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid #f0f0f0;
             display: flex;
             justify-content: space-between;
             align-items: center;
-        ">
-            <span>${escapeHtml(cred.name)}</span>
-            <span style="font-size: 11px; color: #888;">${cred.type}</span>
-        </div>
-    `).join('');
-    
-    // Add click handlers
-    selector.querySelectorAll('.solokeys-option').forEach(option => {
+            gap: 8px;
+        `;
+        const nameEl = document.createElement('span');
+        nameEl.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+        nameEl.innerHTML = username
+            ? `<span style="color:#333">${escapeHtml(domain)}</span><span style="color:#bbb">:</span><span style="color:#888">${escapeHtml(username)}</span>`
+            : `<span style="color:#333">${escapeHtml(domain)}</span>`;
+        const typeEl = document.createElement('span');
+        typeEl.textContent = cred.type;
+        typeEl.style.cssText = 'font-size:11px;color:#bbb;flex-shrink:0;';
+        option.appendChild(nameEl);
+        option.appendChild(typeEl);
+
+        option.addEventListener('mouseenter', () => { option.style.background = '#f5f7ff'; });
+        option.addEventListener('mouseleave', () => { option.style.background = ''; });
         option.addEventListener('click', async () => {
-            const credName = option.dataset.name;
-            await generateAndFillOTP(input, credName);
             selector.remove();
+            await generateAndFillOTP(input, cred.name);
         });
-        
-        option.addEventListener('mouseenter', () => {
-            option.style.background = '#f5f5f5';
-        });
-        option.addEventListener('mouseleave', () => {
-            option.style.background = 'transparent';
-        });
+        selector.appendChild(option);
     });
-    
-    input.parentElement.appendChild(selector);
-    
+
+    document.body.appendChild(selector);
+
+    // Position below (or above) the icon button
+    const btn = input._solokeyBtn;
+    const anchor = btn ? btn.getBoundingClientRect() : input.getBoundingClientRect();
+    const selH = selector.offsetHeight;
+    const spaceBelow = window.innerHeight - anchor.bottom - 8;
+    if (spaceBelow >= selH || spaceBelow >= 120) {
+        selector.style.top = (anchor.bottom + 4) + 'px';
+    } else {
+        selector.style.top = Math.max(8, anchor.top - selH - 4) + 'px';
+    }
+    // Align right edge with button, clamp to viewport
+    const left = Math.min(anchor.right - selector.offsetWidth, window.innerWidth - selector.offsetWidth - 8);
+    selector.style.left = Math.max(8, left) + 'px';
+
     // Close on click outside
     setTimeout(() => {
         document.addEventListener('click', function closeSelector(e) {
-            if (!selector.contains(e.target)) {
+            if (!selector.contains(e.target) && e.target !== btn) {
                 selector.remove();
                 document.removeEventListener('click', closeSelector);
             }
@@ -303,15 +356,14 @@ async function generateAndFillOTP(input, credentialName) {
         
         if (response.success) {
             fillInputWithOTP(input, response.otp);
-        } else if (response.touchRequired) {
+        } else if (response.error === 'TOUCH_REQUIRED') {
             showNotification('Please touch your SoloKeys', 'info');
-            // Poll for touch
             pollForTouchAndFill(input, credentialName);
-        } else if (response.pinRequired) {
-            showNotification('PIN required. Open the extension popup.', 'warning');
+        } else if (response.error === 'PIN_REQUIRED') {
+            showNotification('PIN required — open the extension popup', 'warning');
             input.style.opacity = '';
         } else {
-            showNotification(response.message || 'Failed to generate OTP', 'error');
+            showNotification(response.error || response.message || 'Failed to generate OTP', 'error');
             input.style.opacity = '';
         }
     } catch (error) {
@@ -444,193 +496,62 @@ function observeDOM() {
     });
 }
 
+async function decodeQRFromImage(img) {
+    // Draw to canvas — works for data: URLs and same-origin images
+    const w = img.naturalWidth || img.clientWidth || 0;
+    const h = img.naturalHeight || img.clientHeight || 0;
+    if (w < 30 || h < 30) return null;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    try {
+        ctx.drawImage(img, 0, 0, w, h);
+    } catch (_) {
+        return null; // CORS-tainted
+    }
+
+    const imageData = ctx.getImageData(0, 0, w, h);
+
+    // jsQR is injected as a content script (lib/jsqr.js)
+    if (typeof jsQR !== 'undefined') {
+        const code = jsQR(imageData.data, w, h, { inversionAttempts: 'attemptBoth' });
+        if (code) return code.data;
+    }
+
+    // Fallback: BarcodeDetector (works on Android and some desktop configs)
+    if (typeof BarcodeDetector !== 'undefined') {
+        try {
+            const supported = await BarcodeDetector.getSupportedFormats().catch(() => []);
+            if (supported.includes('qr_code')) {
+                const detector = new BarcodeDetector({ formats: ['qr_code'] });
+                const barcodes = await detector.detect(canvas);
+                if (barcodes.length > 0) return barcodes[0].rawValue;
+            }
+        } catch (_) { /* skip */ }
+    }
+
+    return null;
+}
+
 async function scanImagesForQR() {
     const images = document.querySelectorAll('img');
     const results = [];
 
     for (const img of images) {
-        try {
-            // Skip display:none or hidden images
-            const style = window.getComputedStyle(img);
-            if (style.display === 'none' || style.visibility === 'hidden' || 
-                parseFloat(style.opacity) === 0) {
-                continue;
-            }
+        const style = window.getComputedStyle(img);
+        if (style.display === 'none' || style.visibility === 'hidden' ||
+            parseFloat(style.opacity) === 0) continue;
 
-            // Get dimensions - handle various ways images might be sized
-            let width = img.naturalWidth || img.width || 
-                       parseInt(style.width) || img.clientWidth || 0;
-            let height = img.naturalHeight || img.height || 
-                        parseInt(style.height) || img.clientHeight || 0;
-
-            // Fallback to getting from attributes
-            if (width === 0 || height === 0) {
-                width = parseInt(img.getAttribute('width')) || 0;
-                height = parseInt(img.getAttribute('height')) || 0;
-            }
-
-            // For TOTP-related images, be more lenient with size
-            const id = (img.id || '').toLowerCase();
-            const className = (img.className || '').toLowerCase();
-            const isTotpRelated = id.includes('totp') || id.includes('qr') || 
-                                id.includes('mfa') || id.includes('2fa') ||
-                                className.includes('totp') || className.includes('qr') || 
-                                className.includes('mfa') || className.includes('authenticator');
-
-            // Skip very small images unless they're TOTP-related
-            if (!isTotpRelated && width < 50 && height < 50) continue;
-            
-            // Even for non-TOTP images, don't skip if reasonably sized for QR
-            if (width < 30 || height < 30) continue;
-
-            // Ensure image is loaded
-            if (!img.complete && img.naturalWidth === 0 && img.naturalHeight === 0) {
-                // Wait for image to load with timeout
-                await new Promise((resolve, reject) => {
-                    const timeoutId = setTimeout(() => {
-                        reject(new Error('Image load timeout'));
-                    }, 3000);
-                    
-                    img.onload = () => {
-                        clearTimeout(timeoutId);
-                        resolve();
-                    };
-                    img.onerror = () => {
-                        clearTimeout(timeoutId);
-                        reject(new Error('Image load error'));
-                    };
-                });
-                
-                // Update dimensions after loading
-                width = img.naturalWidth || img.width || 
-                       parseInt(style.width) || img.clientWidth || 0;
-                height = img.naturalHeight || img.height || 
-                        parseInt(style.height) || img.clientHeight || 0;
-            }
-
-            // Skip if still no valid dimensions
-            if (width === 0 || height === 0) continue;
-
-            // Create canvas to draw image
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            // Handle potential overflow/canvas size limits
-            const maxDimension = 2000;
-            if (width > maxDimension || height > maxDimension) {
-                const scale = Math.min(maxDimension / width, maxDimension / height);
-                width = Math.round(width * scale);
-                height = Math.round(height * scale);
-            }
-            
-            canvas.width = width;
-            canvas.height = height;
-
-            try {
-                // Draw image to canvas
-                ctx.drawImage(img, 0, 0, width, height);
-                
-                // Get image data
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                
-                // Check if image has actual data (not completely transparent)
-                let hasData = false;
-                for (let i = 3; i < imageData.data.length; i += 4) {
-                    if (imageData.data[i] > 0) { // Alpha channel > 0
-                        hasData = true;
-                        break;
-                    }
-                }
-                
-                if (!hasData) {
-                    console.log('SoloKeys: Skipping transparent image');
-                    continue;
-                }
-
-                // Try to decode QR with multiple attempts
-                let code = null;
-                
-                // Attempt 1: Normal
-                try {
-                    code = jsQR(imageData.data, imageData.width, imageData.height);
-                } catch (e) {
-                    // Try with inversion
-                    try {
-                        code = jsQR(imageData.data, imageData.width, imageData.height, {
-                            inversionAttempts: 'attemptBoth'
-                        });
-                    } catch (e2) {
-                        // Try with gamma correction
-                        try {
-                            // Create a copy with adjusted contrast
-                            const adjusted = new Uint8ClampedArray(imageData.data);
-                            for (let i = 0; i < adjusted.length; i += 4) {
-                                // Increase contrast
-                                adjusted[i] = Math.min(255, ((adjusted[i] - 128) * 1.5 + 128)); // R
-                                adjusted[i+1] = Math.min(255, ((adjusted[i+1] - 128) * 1.5 + 128)); // G
-                                adjusted[i+2] = Math.min(255, ((adjusted[i+2] - 128) * 1.5 + 128)); // B
-                            }
-                            code = jsQR(adjusted, imageData.width, imageData.height, {
-                                inversionAttempts: 'attemptBoth'
-                            });
-                        } catch (e3) {
-                            // All attempts failed
-                        }
-                    }
-                }
-
-                if (code && code.data.startsWith('otpauth://')) {
-                    console.log('SoloKeys: Found OTP QR code in', 
-                              isTotpRelated ? 'TOTP-related image' : 'image',
-                              '(size:', width, 'x', height, ') -', 
-                              code.data.substring(0, 50) + '...');
-                    results.push({
-                        url: code.data,
-                        imgSrc: img.src,
-                        width: width,
-                        height: height,
-                        isTotpRelated
-                    });
-                } else if (code) {
-                    // Found QR but not OTP
-                    console.log('SoloKeys: Found non-OTP QR code in image (size:', 
-                              width, 'x', height, '):', 
-                              code.data.substring(0, 30) + '...');
-                }
-            } catch (drawError) {
-                console.log('SoloKeys: Error drawing image to canvas:', drawError.message);
-                continue;
-            }
-        } catch (error) {
-            // Only log errors for TOTP-related images to reduce noise
-            const id = (img.id || '').toLowerCase();
-            const className = (img.className || '').toLowerCase();
-            const isTotpRelated = id.includes('totp') || id.includes('qr') || 
-                                id.includes('mfa') || id.includes('2fa') ||
-                                className.includes('totp') || className.includes('qr') || 
-                                className.includes('mfa') || className.includes('authenticator');
-                                
-            if (isTotpRelated) {
-                console.log('SoloKeys: Error processing TOTP-related image:', error.message);
-            }
-            continue;
+        const url = await decodeQRFromImage(img);
+        if (url && url.startsWith('otpauth://')) {
+            console.log('SoloKeys: Found OTP QR code -', url.substring(0, 60));
+            results.push({ url, imgSrc: img.src });
         }
     }
-
-    // Sort results: TOTP-related first, then by size (largest first)
-    results.sort((a, b) => {
-        if (a.isTotpRelated !== b.isTotpRelated) {
-            return b.isTotpRelated ? -1 : 1; // TOTP-related first
-        }
-        return (b.width * b.height) - (a.width * a.height); // Largest first
-    });
 
     console.log('SoloKeys: Scan complete, found', results.length, 'QR codes');
-    if (results.length > 0) {
-        console.log('SoloKeys: Best result:', 
-                   results[0].isTotpRelated ? 'TOTP-related' : 'regular', 
-                   'image', results[0].width, 'x', results[0].height);
-    }
     return results;
 }
 
@@ -638,33 +559,33 @@ function handleMessage(request, sender, sendResponse) {
     switch (request.action) {
         case 'matchingCredentials':
             matchingCredentials = request.credentials || [];
-            // Re-enhance all fields with new credential info
             detectedOTPFields.forEach(field => {
-                // Remove old indicator
-                const oldIndicator = field.parentElement?.querySelector('.solokeys-indicator');
-                if (oldIndicator) oldIndicator.remove();
-                // Re-add with updated state
-                enhanceOTPField(field);
+                const btn = field._solokeyBtn;
+                if (btn) {
+                    btn.style.background = matchingCredentials.length > 0 ? '#667eea' : '#aaa';
+                }
+                if (!field.dataset.solokeyEnhanced) enhanceOTPField(field);
             });
             sendResponse({ received: true });
             break;
 
         case 'fillOTP': {
             const otp = request.otp;
-            let filled = false;
-            const active = document.activeElement;
-
-            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
-                fillInputWithOTP(active, otp);
-                filled = true;
-            } else if (detectedOTPFields.length > 0) {
-                const field = detectedOTPFields[0];
-                field.focus();
-                fillInputWithOTP(field, otp);
-                filled = true;
+            // The popup always steals focus when opened, so document.activeElement
+            // is body by the time this message arrives. Use lastFocusedInput instead.
+            const target = lastFocusedInput;
+            if (target) {
+                target.focus();
+                // Simulate typing via execCommand — dispatches real beforeinput/input
+                // events, works with React/Vue/Angular, unlike setting .value directly.
+                if (!document.execCommand('insertText', false, otp)) {
+                    // execCommand not supported (rare) — fall back to value setter
+                    fillInputWithOTP(target, otp);
+                }
+                sendResponse({ success: true });
+            } else {
+                sendResponse({ success: false });
             }
-
-            sendResponse({ success: filled });
             break;
         }
         
@@ -673,6 +594,26 @@ function handleMessage(request, sender, sendResponse) {
                 sendResponse({ results });
             });
             return true; // Keep channel open for async
+
+        case 'settingsUpdated': {
+            const autoDetect = request.settings?.autoDetectOTP ?? true;
+            if (!autoDetect) {
+                // Remove all injected icons and clear state
+                detectedOTPFields.forEach(field => {
+                    if (field._solokeyBtn) { field._solokeyBtn.remove(); field._solokeyBtn = null; }
+                    delete field.dataset.solokeyEnhanced;
+                });
+                detectedOTPFields = [];
+                matchingCredentials = [];
+            } else if (detectedOTPFields.length === 0) {
+                // Re-run detection if it was previously disabled
+                detectOTPFields();
+                requestMatchingCredentials();
+                observeDOM();
+            }
+            sendResponse({ received: true });
+            break;
+        }
 
         default:
             sendResponse({});

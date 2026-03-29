@@ -109,6 +109,10 @@ async function handleMessage(request, sender) {
                 return { success: false, error: error.message };
             }
 
+        case 'generateOTP':
+        case 'retryAfterTouch':
+            return handleGenerateOTP(request.credentialName);
+
         default:
             // Unknown actions are handled by popup
             return { error: 'Unknown action in background: ' + request.action };
@@ -148,6 +152,26 @@ async function handleCheckSiteMatch(hostname) {
         count: matchingCredentials.length,
         credentials: matchingCredentials
     };
+}
+
+async function handleGenerateOTP(credentialName) {
+    const { extensionClientId } = await chrome.storage.local.get(['extensionClientId']);
+    if (!extensionClientId) return { success: false, error: 'Not paired with SoloKeys GUI' };
+
+    return new Promise(resolve => {
+        chrome.runtime.sendNativeMessage(
+            'com.solokeys.totp',
+            { action: 'calculateOTP', name: credentialName,
+              clientId: extensionClientId, clientName: 'SoloKeys TOTP – Chrome' },
+            (response) => {
+                if (chrome.runtime.lastError) {
+                    resolve({ success: false, error: chrome.runtime.lastError.message });
+                } else {
+                    resolve(response);
+                }
+            }
+        );
+    });
 }
 
 function updateBadge() {

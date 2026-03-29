@@ -2,12 +2,10 @@
 // Options page logic for SoloKeys TOTP extension
 
 import NativeTransport from '../lib/native-transport.js';
-import OATHProtocol from '../lib/oath.js';
 
 let isConnected = false;
 let credentials = [];
 let device = null;
-let oath = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
@@ -61,27 +59,36 @@ function switchTab(tabId) {
 
 async function loadSettings() {
     const settings = await chrome.storage.local.get({
-        autoCopy: false,
+        autoDetectOTP: true,
         showNotifications: true
     });
 
-    document.getElementById('autoCopy').checked = settings.autoCopy;
+    document.getElementById('autoDetectOTP').checked = settings.autoDetectOTP;
     document.getElementById('showNotifications').checked = settings.showNotifications;
 }
 
 async function saveSettings() {
     const settings = {
-        autoCopy: document.getElementById('autoCopy').checked,
+        autoDetectOTP: document.getElementById('autoDetectOTP').checked,
         showNotifications: document.getElementById('showNotifications').checked
     };
 
     await chrome.storage.local.set(settings);
+
+    // Notify all content scripts of the new setting
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+        if (tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+            chrome.tabs.sendMessage(tab.id, { action: 'settingsUpdated', settings }).catch(() => {});
+        }
+    }
+
     showMessage('Settings saved successfully', 'success');
 }
 
 async function resetSettings() {
     await chrome.storage.local.set({
-        autoCopy: false,
+        autoDetectOTP: true,
         showNotifications: true
     });
     await loadSettings();
@@ -147,11 +154,9 @@ async function connectToDevice() {
         device = new NativeTransport();
         await device.connect(30000); // 30 second timeout for user confirmation
 
-        oath = new OATHProtocol(device);
-
         credentials = [];
         try {
-            credentials = await oath.listCredentials();
+            credentials = await device.listCredentials();
         } catch (e) {
             console.warn('Could not list credentials:', e);
         }
@@ -166,7 +171,7 @@ async function connectToDevice() {
             action: 'updateDeviceState',
             connected: true,
             credentials,
-            pinVerified: oath.pinVerified
+            pinVerified: false
         });
     } catch (error) {
         console.error('Failed to connect to SoloKeys GUI:', error);
@@ -177,30 +182,10 @@ async function connectToDevice() {
     }
 }
 
-        isConnected = true;
-        updateConnectionStatus(true, credentials.length);
-        renderCredentialList();
-        showMessage('Connected to SoloKeys GUI!', 'success');
-
-        // Sync state to background
-        await chrome.runtime.sendMessage({
-            action: 'updateDeviceState',
-            connected: true,
-            credentials,
-            pinVerified: oath.pinVerified
-        });
-    } catch (error) {
-        console.error('Failed to connect to device:', error);
-        showMessage('Failed to connect: ' + error.message, 'error');
-        const connectBtn = document.getElementById('connectBtn');
-        connectBtn.textContent = 'Connect Device';
-    }
-}
-
 async function loadCredentials() {
-    if (!oath) return;
+    if (!device) return;
     try {
-        credentials = await oath.listCredentials();
+        credentials = await device.listCredentials();
         renderCredentialList();
         updateConnectionStatus(isConnected, credentials.length);
     } catch (error) {
@@ -254,13 +239,13 @@ async function deleteCredential(name) {
     );
     if (!confirmed) return;
 
-    if (!oath) {
+    if (!device) {
         showMessage('Not connected to SoloKeys GUI', 'error');
         return;
     }
 
     try {
-        const result = await oath.deleteCredential(name);
+        const result = await device.deleteCredential(name);
         if (result.success) {
             showMessage('Credential deleted successfully', 'success');
             await loadCredentials();
@@ -316,7 +301,7 @@ async function handleAddCredential() {
         return;
     }
 
-    if (!oath) {
+    if (!device) {
         showMessage('Not connected to SoloKeys GUI', 'error');
         return;
     }
@@ -330,7 +315,7 @@ async function handleAddCredential() {
     }
 
     try {
-        const result = await oath.addCredential(name, secretBytes, type, algorithm, digits, { touchRequired, pinEncrypted });
+        const result = await device.addCredential(name, secretBytes, type, algorithm, digits, { touchRequired, pinProtected: pinEncrypted });
         if (result.success) {
             showMessage('Credential added successfully!', 'success');
             clearAddForm();
@@ -342,9 +327,9 @@ async function handleAddCredential() {
     } catch (error) {
         if (error.type === 'PIN_REQUIRED') {
             showPinModal(async (pin) => {
-                const pinResult = await oath.verifyPIN(pin);
+                const pinResult = await device.verifyPIN(pin);
                 if (pinResult.success) {
-                    const retryResult = await oath.addCredential(name, secretBytes, type, algorithm, digits, { touchRequired, pinEncrypted });
+                    const retryResult = await device.addCredential(name, secretBytes, type, algorithm, digits, { touchRequired, pinProtected: pinEncrypted });
                     if (retryResult.success) {
                         showMessage('Credential added successfully!', 'success');
                         clearAddForm();
@@ -547,13 +532,13 @@ async function handleSetPIN() {
         return;
     }
 
-    if (!oath) {
+    if (!device) {
         showMessage('Not connected to SoloKeys GUI', 'error');
         return;
     }
 
     try {
-        const result = await oath.setPIN(pin);
+        const result = await device.setPIN(pin);
         if (result.success) {
             showMessage('PIN set successfully!', 'success');
             document.getElementById('newPin').value = '';
@@ -579,13 +564,13 @@ async function handleChangePIN() {
         return;
     }
 
-    if (!oath) {
+    if (!device) {
         showMessage('Not connected to SoloKeys GUI', 'error');
         return;
     }
 
     try {
-        const result = await oath.changePIN(currentPin, newPin);
+        const result = await device.changePIN(currentPin, newPin);
         if (result.success) {
             showMessage('PIN changed successfully!', 'success');
             document.getElementById('currentPin').value = '';
