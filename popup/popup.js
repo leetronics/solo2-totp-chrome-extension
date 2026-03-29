@@ -17,7 +17,6 @@ let pendingAction = 'display'; // 'display' | 'copy' | 'type'
 let isSyncing = false;
 let currentHostname = '';
 let foundQRCodes = [];
-let approvalPoller = null;
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
@@ -68,51 +67,13 @@ function isCachedWhileOffline() {
     return !isConnected && credentials.length > 0;
 }
 
-function startApprovalPoller() {
-    if (approvalPoller) return;
-    approvalPoller = setInterval(async () => {
-        try {
-            await connectToDevice(true);
-            stopApprovalPoller();
-        } catch (e) {
-            if (!e.message?.includes('Waiting for SoloKeys GUI confirmation')) {
-                stopApprovalPoller();
-                document.getElementById('connectBtn').disabled = false;
-                document.getElementById('connectBtn').textContent = 'Connect to SoloKeys GUI';
-                const helpText = document.getElementById('connectHelp');
-                helpText.style.display = 'none';
-            }
-        }
-    }, 2000);
-}
-
-function stopApprovalPoller() {
-    if (approvalPoller) { clearInterval(approvalPoller); approvalPoller = null; }
-    chrome.storage.local.remove(['pendingPairing']);
-}
-
 async function silentConnect() {
     if (isConnected || isSyncing) return;
-
-    // If a pairing approval is already in progress, resume polling
-    const stored = await chrome.storage.local.get(['pendingPairing']);
-    if (stored.pendingPairing) {
-        startApprovalPoller();
-        return;
-    }
-
-    // Always attempt a silent connect — connect() fails fast (3 s) when the
-    // GUI is not running, so this never hangs the popup noticeably.
     try {
         isSyncing = true;
         await connectToDevice(true);
-    } catch (error) {
-        if (error.message?.includes('Waiting for SoloKeys GUI confirmation')) {
-            // GUI showed the pairing dialog — persist and start polling
-            await chrome.storage.local.set({ pendingPairing: true });
-            startApprovalPoller();
-        }
-        // Any other error (GUI not running): fail silently, show Connect button
+    } catch (_) {
+        // Fail silently — GUI/device not available; show Connect button
     } finally {
         isSyncing = false;
     }
@@ -142,19 +103,19 @@ function updateConnectionStatus(connected, count, isCached = false) {
 
     if (connected) {
         indicator.classList.add('connected');
-        statusText.textContent = `Connected to SoloKeys GUI • ${count} credentials`;
+        statusText.textContent = `SoloKey connected • ${count} credentials`;
         connectBtn.style.display = 'none';
         isConnected = true;
     } else if (isCached) {
         indicator.classList.remove('connected');
         statusText.textContent = `Cached • ${count} credentials`;
-        connectBtn.textContent = 'Connect to SoloKeys GUI';
+        connectBtn.textContent = 'Connect to SoloKey';
         connectBtn.style.display = 'block';
         isConnected = false;
     } else {
         indicator.classList.remove('connected');
-        statusText.textContent = 'Not connected to SoloKeys GUI';
-        connectBtn.textContent = 'Connect to SoloKeys GUI';
+        statusText.textContent = 'SoloKey not connected';
+        connectBtn.textContent = 'Connect to SoloKey';
         connectBtn.style.display = 'block';
         isConnected = false;
     }
@@ -163,48 +124,31 @@ function updateConnectionStatus(connected, count, isCached = false) {
 async function handleConnect() {
     const connectBtn = document.getElementById('connectBtn');
     const helpText = document.getElementById('connectHelp');
-    
+
     connectBtn.textContent = 'Connecting...';
     connectBtn.disabled = true;
     helpText.style.display = 'block';
-    helpText.textContent = 'Check SoloKeys GUI for confirmation dialog...';
+    helpText.textContent = 'Connecting to SoloKeys…';
 
     try {
-        await connectToDevice(false); // explicit user action, not silent
+        await connectToDevice(false);
         helpText.style.display = 'none';
     } catch (error) {
         console.error('Connection error:', error);
-
-        if (error.message?.includes('Waiting for SoloKeys GUI confirmation')) {
-            showMessage('Approve the connection request in SoloKeys GUI…', 'info');
-            helpText.style.display = 'block';
-            helpText.textContent = 'Waiting for approval in SoloKeys GUI…';
-            // Don't re-enable button — stay in "Connecting…" state
-            await chrome.storage.local.set({ pendingPairing: true });
-            startApprovalPoller();
-        } else {
-            showMessage('Connection failed: ' + error.message, 'error');
-            updateConnectionStatus(false, credentials.length, isCachedWhileOffline());
-            helpText.style.display = 'block';
-            helpText.textContent = 'Click to try again';
-            connectBtn.textContent = 'Connect to SoloKeys GUI';
-            connectBtn.disabled = false;
-        }
+        showMessage('Connection failed: ' + error.message, 'error');
+        updateConnectionStatus(false, credentials.length, isCachedWhileOffline());
+        helpText.style.display = 'block';
+        helpText.textContent = error.message?.includes('ative host')
+            ? 'Native messaging host not found — install it via SoloKeys GUI → Settings → Browser.'
+            : 'Click to try again';
+        connectBtn.textContent = 'Connect to SoloKey';
+        connectBtn.disabled = false;
     }
 }
 
 async function connectToDevice(silent = false) {
     device = new NativeTransport();
-
-    try {
-        await device.connect(60000); // 60 second timeout for user confirmation
-    } catch (error) {
-        // If waiting for confirmation, don't immediately fail - give user time to approve
-        if (error.message && error.message.includes('Waiting for SoloKeys GUI confirmation')) {
-            throw error; // Re-throw so caller can handle it
-        }
-        throw error;
-    }
+    await device.connect(5000);
 
     let creds = [];
     try {
@@ -215,8 +159,6 @@ async function connectToDevice(silent = false) {
 
     credentials = creds;
     isConnected = true;
-    chrome.storage.local.remove(['pendingPairing']);
-    stopApprovalPoller();
 
     await chrome.runtime.sendMessage({
         action: 'updateDeviceState',
@@ -229,7 +171,7 @@ async function connectToDevice(silent = false) {
     renderCredentials();
 
     if (!silent) {
-        showMessage('Connected to SoloKeys GUI!', 'success');
+        showMessage('SoloKey connected!', 'success');
     }
 }
 
@@ -239,10 +181,10 @@ async function generateOTP(credential, action = 'display') {
     if (!isConnected || !device) {
         // Try to connect first
         try {
-            showMessage('Connecting to SoloKeys GUI...', 'info');
+            showMessage('Connecting to SoloKey...', 'info');
             await connectToDevice();
         } catch (error) {
-            showMessage('Connect to SoloKeys GUI to generate a code', 'info');
+            showMessage('Insert your SoloKey to generate a code', 'info');
             return;
         }
     }
@@ -374,14 +316,14 @@ function renderCredentials() {
         list.innerHTML = `
             <div class="empty-state">
                 <div class="empty-state-icon">🔑</div>
-                <p>${isConnected ? 'No credentials found' : 'Connect to SoloKeys GUI to see credentials'}</p>
+                <p>${isConnected ? 'No credentials found' : 'Insert your SoloKey to see credentials'}</p>
                 ${isConnected ? '<button class="btn" id="addFirstCredBtn" style="margin-top: 8px;">Add Credential</button>' : ''}
             </div>
         `;
         document.getElementById('addFirstCredBtn')?.addEventListener('click', handleOpenOptions);
     } else {
         const cachedBanner = cached
-            ? '<div class="message info" style="margin:0 0 8px;">Showing cached credentials — connect to SoloKeys GUI to generate codes</div>'
+            ? '<div class="message info" style="margin:0 0 8px;">Showing cached credentials — insert your SoloKey to generate codes</div>'
             : '';
         list.innerHTML = cachedBanner + credentials.map(cred =>
             createCredentialItem(cred, matchingCredentials.some(m => m.name === cred.name), cached)
@@ -399,7 +341,7 @@ function attachCredentialHandlers(container, credList, cached) {
         el.addEventListener('click', (e) => {
             if (e.target.closest('.btn-row')) return;
             if (cached) {
-                showMessage('Connect to SoloKeys GUI to generate a code', 'info');
+                showMessage('Insert your SoloKey to generate a code', 'info');
             } else {
                 generateOTP(cred, 'display');
             }
@@ -614,10 +556,10 @@ async function handleQuickAddCredential() {
     // Ensure we're connected
     if (!isConnected || !device) {
         try {
-            showMessage('Connecting to SoloKeys GUI...', 'info');
+            showMessage('Connecting to SoloKey...', 'info');
             await connectToDevice();
         } catch (error) {
-            showMessage('Please connect to SoloKeys GUI first', 'error');
+            showMessage('Please insert your SoloKey first', 'error');
             return;
         }
     }

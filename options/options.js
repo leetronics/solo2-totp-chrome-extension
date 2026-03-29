@@ -111,14 +111,14 @@ function updateConnectionStatus(connected, count) {
 
     if (connected) {
         indicator.classList.add('connected');
-        statusText.textContent = `Connected to SoloKeys GUI • ${count} credential${count !== 1 ? 's' : ''}`;
+        statusText.textContent = `SoloKey connected • ${count} credential${count !== 1 ? 's' : ''}`;
         connectBtn.style.display = 'none';
         if (helpText) helpText.style.display = 'none';
         isConnected = true;
     } else {
         indicator.classList.remove('connected');
-        statusText.textContent = 'Not connected to SoloKeys GUI';
-        connectBtn.textContent = 'Connect to SoloKeys GUI';
+        statusText.textContent = 'SoloKey not connected';
+        connectBtn.textContent = 'Connect to SoloKey';
         connectBtn.style.display = 'block';
         isConnected = false;
     }
@@ -132,7 +132,7 @@ async function handleConnect() {
     connectBtn.disabled = true;
     if (helpText) {
         helpText.style.display = 'block';
-        helpText.textContent = 'Check SoloKeys GUI for confirmation dialog...';
+        helpText.textContent = 'Connecting to SoloKeys…';
     }
 
     try {
@@ -142,7 +142,9 @@ async function handleConnect() {
         showMessage('Connection failed: ' + error.message, 'error');
         if (helpText) {
             helpText.style.display = 'block';
-            helpText.textContent = 'Click to try again';
+            helpText.textContent = error.message?.includes('ative host')
+                ? 'Native messaging host not found — install it via SoloKeys GUI → Settings → Browser.'
+                : 'Click to try again';
         }
     } finally {
         connectBtn.disabled = false;
@@ -152,7 +154,7 @@ async function handleConnect() {
 async function connectToDevice() {
     try {
         device = new NativeTransport();
-        await device.connect(30000); // 30 second timeout for user confirmation
+        await device.connect(5000);
 
         credentials = [];
         try {
@@ -164,7 +166,7 @@ async function connectToDevice() {
         isConnected = true;
         updateConnectionStatus(true, credentials.length);
         renderCredentialList();
-        showMessage('Connected to SoloKeys GUI!', 'success');
+        showMessage('SoloKey connected!', 'success');
 
         // Sync state to background
         await chrome.runtime.sendMessage({
@@ -177,7 +179,7 @@ async function connectToDevice() {
         console.error('Failed to connect to SoloKeys GUI:', error);
         showMessage('Failed to connect: ' + error.message, 'error');
         const connectBtn = document.getElementById('connectBtn');
-        connectBtn.textContent = 'Connect to SoloKeys GUI';
+        connectBtn.textContent = 'Connect to SoloKey';
         isConnected = false;
     }
 }
@@ -240,7 +242,7 @@ async function deleteCredential(name) {
     if (!confirmed) return;
 
     if (!device) {
-        showMessage('Not connected to SoloKeys GUI', 'error');
+        showMessage('SoloKey not connected', 'error');
         return;
     }
 
@@ -302,7 +304,7 @@ async function handleAddCredential() {
     }
 
     if (!device) {
-        showMessage('Not connected to SoloKeys GUI', 'error');
+        showMessage('SoloKey not connected', 'error');
         return;
     }
 
@@ -533,7 +535,7 @@ async function handleSetPIN() {
     }
 
     if (!device) {
-        showMessage('Not connected to SoloKeys GUI', 'error');
+        showMessage('SoloKey not connected', 'error');
         return;
     }
 
@@ -565,7 +567,7 @@ async function handleChangePIN() {
     }
 
     if (!device) {
-        showMessage('Not connected to SoloKeys GUI', 'error');
+        showMessage('SoloKey not connected', 'error');
         return;
     }
 
