@@ -13,9 +13,17 @@ let recentlyConnected = false;
 let pinVerified = false;
 let lastConnectionAttempt = 0;
 let lastProbeAt = 0;
+let nativePort = null;
+let nativePortIdleTimer = null;
+let nativeRequestInFlight = 0;
+let nativeRequestQueue = Promise.resolve();
 
+const HOST_NAME = 'com.solokeys.secrets';
+const CLIENT_NAME = 'SoloKeys Secrets – Chrome';
 const PROBE_COOLDOWN_MS = 1500;
 const RECENT_CONNECTION_WINDOW_MS = 15000;
+const NATIVE_IDLE_MS = 120000;
+const NATIVE_REQUEST_TIMEOUT_MS = 15000;
 
 // Initialize on startup
 chrome.runtime.onStartup.addListener(initialize);
@@ -47,6 +55,156 @@ async function initialize() {
     
     // Update badge with any cached matches
     updateBadge();
+}
+
+function scheduleNativePortDisconnect() {
+    if (nativePortIdleTimer) {
+        clearTimeout(nativePortIdleTimer);
+        nativePortIdleTimer = null;
+    }
+
+    if (!nativePort || nativeRequestInFlight > 0) {
+        return;
+    }
+
+    nativePortIdleTimer = setTimeout(() => {
+        disconnectNativePort('idle');
+    }, NATIVE_IDLE_MS);
+}
+
+function disconnectNativePort(reason = 'manual') {
+    if (nativePortIdleTimer) {
+        clearTimeout(nativePortIdleTimer);
+        nativePortIdleTimer = null;
+    }
+
+    if (!nativePort) {
+        return;
+    }
+
+    const port = nativePort;
+    nativePort = null;
+
+    try {
+        port.disconnect();
+    } catch (_) {
+        // Port already closed.
+    }
+
+    console.log(`SoloKeys Secrets: Native host port closed (${reason})`);
+}
+
+function ensureNativePort() {
+    if (nativePort) {
+        return nativePort;
+    }
+
+    const port = chrome.runtime.connectNative(HOST_NAME);
+    port.onDisconnect.addListener(() => {
+        if (nativePort === port) {
+            nativePort = null;
+        }
+        if (nativePortIdleTimer) {
+            clearTimeout(nativePortIdleTimer);
+            nativePortIdleTimer = null;
+        }
+
+        const message = chrome.runtime.lastError?.message || 'Native host disconnected';
+        console.warn(`SoloKeys Secrets: ${message}`);
+    });
+
+    nativePort = port;
+    console.log('SoloKeys Secrets: Native host port opened');
+    return port;
+}
+
+function sendNativeRequest(payload, options = {}) {
+    const run = () => sendNativeRequestNow(payload, options);
+    const request = nativeRequestQueue.then(run, run);
+    nativeRequestQueue = request.catch(() => {});
+    return request;
+}
+
+function sendNativeRequestNow(payload, options = {}) {
+    const timeoutMs = options.timeoutMs ?? NATIVE_REQUEST_TIMEOUT_MS;
+    const port = ensureNativePort();
+
+    nativeRequestInFlight += 1;
+    if (nativePortIdleTimer) {
+        clearTimeout(nativePortIdleTimer);
+        nativePortIdleTimer = null;
+    }
+
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        let timeoutId = null;
+
+        const finish = (callback, value) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            if (timeoutId !== null) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            port.onMessage.removeListener(onMessage);
+            port.onDisconnect.removeListener(onDisconnect);
+            nativeRequestInFlight = Math.max(0, nativeRequestInFlight - 1);
+            scheduleNativePortDisconnect();
+            callback(value);
+        };
+
+        const onMessage = (response) => {
+            finish(resolve, response);
+        };
+
+        const onDisconnect = () => {
+            const message = chrome.runtime.lastError?.message || 'Native host disconnected';
+            if (nativePort === port) {
+                nativePort = null;
+            }
+            finish(reject, new Error(message));
+        };
+
+        timeoutId = setTimeout(() => {
+            disconnectNativePort('request-timeout');
+            finish(reject, new Error('Native host request timeout'));
+        }, timeoutMs);
+
+        port.onMessage.addListener(onMessage);
+        port.onDisconnect.addListener(onDisconnect);
+
+        try {
+            port.postMessage(payload);
+        } catch (error) {
+            disconnectNativePort('post-failed');
+            finish(reject, error);
+        }
+    });
+}
+
+async function getExtensionClientId() {
+    const stored = await chrome.storage.local.get(['extensionClientId']);
+    if (stored.extensionClientId) {
+        return stored.extensionClientId;
+    }
+
+    const clientId = crypto.randomUUID();
+    await chrome.storage.local.set({ extensionClientId: clientId });
+    return clientId;
+}
+
+async function sendNativeHostAction(payload, options = {}) {
+    const clientId = await getExtensionClientId();
+    return sendNativeRequest(
+        {
+            ...payload,
+            clientId,
+            clientName: CLIENT_NAME,
+        },
+        options,
+    );
 }
 
 // Handle messages from popup and content scripts
@@ -97,6 +255,11 @@ async function handleMessage(request, sender) {
 
         case 'probeDevice':
             return await probeDevice(request.force === true);
+
+        case 'nativeRequest':
+            return await sendNativeRequest(request.payload || {}, {
+                timeoutMs: request.timeoutMs,
+            });
 
         case 'getCredentials':
             return { credentials };
@@ -181,23 +344,11 @@ async function handleCheckSiteMatch(hostname) {
 }
 
 async function handleGenerateOTP(credentialName) {
-    const { extensionClientId } = await chrome.storage.local.get(['extensionClientId']);
-    if (!extensionClientId) return { success: false, error: 'Not paired with SoloKeys GUI' };
-
-    return new Promise(resolve => {
-        chrome.runtime.sendNativeMessage(
-            'com.solokeys.secrets',
-            { action: 'calculateOTP', name: credentialName,
-              clientId: extensionClientId, clientName: 'SoloKeys Secrets – Chrome' },
-            (response) => {
-                if (chrome.runtime.lastError) {
-                    resolve({ success: false, error: chrome.runtime.lastError.message });
-                } else {
-                    resolve(response);
-                }
-            }
-        );
-    });
+    try {
+        return await sendNativeHostAction({ action: 'calculateOTP', name: credentialName });
+    } catch (error) {
+        return { success: false, error: error.message || String(error) };
+    }
 }
 
 async function probeDevice(force = false) {
@@ -213,37 +364,15 @@ async function probeDevice(force = false) {
 
     lastProbeAt = Date.now();
 
-    const { extensionClientId } = await chrome.storage.local.get(['extensionClientId']);
-    if (!extensionClientId) {
-        deviceConnected = false;
-        pinVerified = false;
-        return {
-            success: false,
-            connected: false,
-            credentials,
-            pinVerified: false,
-            cached: credentials.length > 0,
-            error: 'Not paired with SoloKeys GUI',
-        };
-    }
-
-    const response = await new Promise(resolve => {
-        chrome.runtime.sendNativeMessage(
-            'com.solokeys.secrets',
-            {
-                action: 'listCredentials',
-                clientId: extensionClientId,
-                clientName: 'SoloKeys Secrets – Chrome',
-            },
-            (nativeResponse) => {
-                if (chrome.runtime.lastError) {
-                    resolve({ success: false, error: chrome.runtime.lastError.message });
-                } else {
-                    resolve(nativeResponse || { success: false, error: 'No response from native host' });
-                }
-            }
+    let response;
+    try {
+        response = await sendNativeHostAction(
+            { action: 'listCredentials' },
+            { timeoutMs: NATIVE_REQUEST_TIMEOUT_MS },
         );
-    });
+    } catch (error) {
+        response = { success: false, error: error.message || String(error) };
+    }
 
     if (response?.success) {
         deviceConnected = true;
@@ -288,23 +417,11 @@ async function probeDevice(force = false) {
 }
 
 async function handleGetPasswordEntry(credentialName) {
-    const { extensionClientId } = await chrome.storage.local.get(['extensionClientId']);
-    if (!extensionClientId) return { success: false, error: 'Not paired with SoloKeys GUI' };
-
-    return new Promise(resolve => {
-        chrome.runtime.sendNativeMessage(
-            'com.solokeys.secrets',
-            { action: 'getPasswordEntry', name: credentialName,
-              clientId: extensionClientId, clientName: 'SoloKeys Secrets – Chrome' },
-            (response) => {
-                if (chrome.runtime.lastError) {
-                    resolve({ success: false, error: chrome.runtime.lastError.message });
-                } else {
-                    resolve(response);
-                }
-            }
-        );
-    });
+    try {
+        return await sendNativeHostAction({ action: 'getPasswordEntry', name: credentialName });
+    } catch (error) {
+        return { success: false, error: error.message || String(error) };
+    }
 }
 
 function updateBadge() {
