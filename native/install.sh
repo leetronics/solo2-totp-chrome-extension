@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the SoloKeys TOTP native messaging host for Chrome.
+# Install the SoloKeys Secrets native messaging host for Chrome.
 #
 # Usage:
 #   ./install.sh <extension-id>
@@ -20,7 +20,7 @@ EXT_ID="$1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST_PATH="$SCRIPT_DIR/host.py"
 MANIFEST_DIR="$HOME/.config/google-chrome/NativeMessagingHosts"
-MANIFEST_PATH="$MANIFEST_DIR/com.solokeys.totp.json"
+MANIFEST_PATH="$MANIFEST_DIR/com.solokeys.secrets.json"
 
 # Make host executable
 chmod +x "$HOST_PATH"
@@ -35,8 +35,8 @@ fi
 mkdir -p "$MANIFEST_DIR"
 cat > "$MANIFEST_PATH" <<EOF
 {
-    "name": "com.solokeys.totp",
-    "description": "SoloKeys TOTP native messaging host",
+    "name": "com.solokeys.secrets",
+    "description": "SoloKeys Secrets native messaging host",
     "path": "$HOST_PATH",
     "type": "stdio",
     "allowed_origins": [

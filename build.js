@@ -72,9 +72,9 @@ function validateExtension() {
         'lib/native-transport.js',
         'lib/utils.js',
         'icons/icon.svg',
-        'icons/icon-16.png',
-        'icons/icon-48.png',
-        'icons/icon-128.png'
+        'icons/new-logo-16.png',
+        'icons/new-logo-48.png',
+        'icons/new-logo-128.png'
     ];
     
     let allValid = true;
@@ -377,9 +377,9 @@ dist/
 │   └── utils.js
 ├── icons/
 │   ├── icon.svg
-│   ├── icon-16.png
-│   ├── icon-48.png
-│   └── icon-128.png
+│   ├── new-logo-16.png
+│   ├── new-logo-48.png
+│   └── new-logo-128.png
 └── README.md
 \`\`\`
 

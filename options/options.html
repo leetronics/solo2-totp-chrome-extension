@@ -94,6 +94,12 @@
             gap: 20px;
             margin-top: 8px;
         }
+
+        .stack {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
         
         .checkbox-item {
             display: flex;
@@ -396,44 +402,74 @@
                 <div class="form-group">
                     <label>Credential Name</label>
                     <input type="text" id="credName" placeholder="e.g., GitHub:username@github.com">
-                    <p class="help-text">Use format: Service:identifier@domain for best site matching</p>
+                    <p class="help-text">Best practice: include the site domain in the name, for example github.com:manuel. The popup quick-add flow does this automatically for the current site.</p>
                 </div>
-                
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Algorithm</label>
-                        <select id="credAlgorithm">
-                            <option value="SHA1">SHA1 (most common)</option>
-                            <option value="SHA256">SHA256</option>
-                            <option value="SHA512">SHA512</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Type</label>
-                        <select id="credType">
-                            <option value="TOTP">TOTP (Time-based)</option>
-                            <option value="HOTP">HOTP (Counter-based)</option>
-                        </select>
-                    </div>
+
+                <div class="checkbox-group">
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="credEnableOtp" checked>
+                        <span>Enable OTP</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="credEnablePassword">
+                        <span>Enable Password Safe</span>
+                    </label>
                 </div>
-                
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Digits</label>
-                        <select id="credDigits">
-                            <option value="6" selected>6 digits</option>
-                            <option value="8">8 digits</option>
-                        </select>
+
+                <div class="stack">
+                    <div id="otpFields">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Algorithm</label>
+                                <select id="credAlgorithm">
+                                    <option value="SHA1">SHA1 (most common)</option>
+                                    <option value="SHA256">SHA256</option>
+                                    <option value="SHA512">SHA512</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Type</label>
+                                <select id="credType">
+                                    <option value="TOTP">TOTP (Time-based)</option>
+                                    <option value="HOTP">HOTP (Counter-based)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Digits</label>
+                                <select id="credDigits">
+                                    <option value="6" selected>6 digits</option>
+                                    <option value="8">8 digits</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Secret Key</label>
+                            <div class="secret-input-group">
+                                <input type="text" id="credSecret" placeholder="Base32 encoded secret (e.g., JBSWY3DPEHPK3PXP)">
+                                <button class="btn btn-secondary scan-btn" id="scanQrBtn">📤 Upload QR Image</button>
+                            </div>
+                            <p class="help-text">Enter the secret key or find a QR code on any open page</p>
+                        </div>
                     </div>
-                </div>
-                
-                <div class="form-group">
-                    <label>Secret Key</label>
-                    <div class="secret-input-group">
-                        <input type="text" id="credSecret" placeholder="Base32 encoded secret (e.g., JBSWY3DPEHPK3PXP)">
-                        <button class="btn btn-secondary scan-btn" id="scanQrBtn">📤 Upload QR Image</button>
+
+                    <div id="passwordFields" style="display: none;">
+                        <div class="form-group">
+                            <label>Login</label>
+                            <input type="text" id="credLogin" placeholder="Username or email">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" id="credPassword" placeholder="Password">
+                        </div>
+                        <div class="form-group">
+                            <label>Notes</label>
+                            <input type="text" id="credMetadata" placeholder="Optional notes">
+                        </div>
                     </div>
-                    <p class="help-text">Enter the secret key or find a QR code on any open page</p>
                 </div>
                 
                 <div class="checkbox-group">
@@ -492,6 +528,13 @@
                     <label class="checkbox-item">
                         <input type="checkbox" id="autoDetectOTP">
                         <span>Enable autofill detection of OTP fields</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="autoDetectPasswords">
+                        <span>Enable autofill for password fields</span>
                     </label>
                 </div>
 

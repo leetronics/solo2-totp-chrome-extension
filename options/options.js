@@ -11,6 +11,7 @@ let device = null;
 document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     setupTabs();
+    syncAddForm();
     await loadSettings();
     await checkDeviceStatus();
 });
@@ -28,6 +29,8 @@ function setupEventListeners() {
     document.getElementById('addCredBtn').addEventListener('click', handleAddCredential);
     document.getElementById('clearFormBtn').addEventListener('click', clearAddForm);
     document.getElementById('scanQrBtn').addEventListener('click', handleScanQR);
+    document.getElementById('credEnableOtp').addEventListener('change', syncAddForm);
+    document.getElementById('credEnablePassword').addEventListener('change', syncAddForm);
 
     // PIN management
     document.getElementById('setPinBtn').addEventListener('click', handleSetPIN);
@@ -49,6 +52,13 @@ function setupTabs() {
     // Already handled in setupEventListeners
 }
 
+function syncAddForm() {
+    const otpEnabled = document.getElementById('credEnableOtp').checked;
+    const passwordEnabled = document.getElementById('credEnablePassword').checked;
+    document.getElementById('otpFields').style.display = otpEnabled ? '' : 'none';
+    document.getElementById('passwordFields').style.display = passwordEnabled ? '' : 'none';
+}
+
 function switchTab(tabId) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -60,16 +70,19 @@ function switchTab(tabId) {
 async function loadSettings() {
     const settings = await chrome.storage.local.get({
         autoDetectOTP: true,
+        autoDetectPasswords: true,
         showNotifications: true
     });
 
     document.getElementById('autoDetectOTP').checked = settings.autoDetectOTP;
+    document.getElementById('autoDetectPasswords').checked = settings.autoDetectPasswords;
     document.getElementById('showNotifications').checked = settings.showNotifications;
 }
 
 async function saveSettings() {
     const settings = {
         autoDetectOTP: document.getElementById('autoDetectOTP').checked,
+        autoDetectPasswords: document.getElementById('autoDetectPasswords').checked,
         showNotifications: document.getElementById('showNotifications').checked
     };
 
@@ -89,6 +102,7 @@ async function saveSettings() {
 async function resetSettings() {
     await chrome.storage.local.set({
         autoDetectOTP: true,
+        autoDetectPasswords: true,
         showNotifications: true
     });
     await loadSettings();
@@ -211,7 +225,7 @@ function renderCredentialList() {
     }
 
     list.innerHTML = credentials.map(cred => `
-        <div class="credential-card" data-credential-name="${escapeHtml(cred.name)}">
+        <div class="credential-card" data-credential-name="${escapeHtml(cred.rawName || cred.name)}">
             <div class="credential-info">
                 <h3>${escapeHtml(cred.name)}</h3>
                 <p>${cred.type} • ${cred.algorithm} • ${cred.digits} digits</p>
@@ -286,20 +300,25 @@ function showConfirmDialog(title, message) {
 
 async function handleAddCredential() {
     const name = document.getElementById('credName').value.trim();
+    const otpEnabled = document.getElementById('credEnableOtp').checked;
+    const passwordEnabled = document.getElementById('credEnablePassword').checked;
     const secret = document.getElementById('credSecret').value.trim();
     const type = document.getElementById('credType').value;
     const algorithm = document.getElementById('credAlgorithm').value;
     const digits = parseInt(document.getElementById('credDigits').value);
     const touchRequired = document.getElementById('credTouch').checked;
     const pinEncrypted = document.getElementById('credPin').checked;
+    const login = document.getElementById('credLogin').value;
+    const password = document.getElementById('credPassword').value;
+    const metadata = document.getElementById('credMetadata').value;
 
     if (!name) {
         showMessage('Please enter a credential name', 'error');
         return;
     }
 
-    if (!secret) {
-        showMessage('Please enter or scan a secret key', 'error');
+    if (!otpEnabled && !passwordEnabled) {
+        showMessage('Enable OTP, Password Safe, or both', 'error');
         return;
     }
 
@@ -309,15 +328,30 @@ async function handleAddCredential() {
     }
 
     let secretBytes;
-    try {
-        secretBytes = base32Decode(secret);
-    } catch (error) {
-        showMessage('Invalid secret key format. Must be Base32 encoded.', 'error');
-        return;
+    if (otpEnabled) {
+        if (!secret) {
+            showMessage('Please enter or scan a secret key', 'error');
+            return;
+        }
+        try {
+            secretBytes = base32Decode(secret);
+        } catch (error) {
+            showMessage('Invalid secret key format. Must be Base32 encoded.', 'error');
+            return;
+        }
+    } else {
+        secretBytes = crypto.getRandomValues(new Uint8Array(20));
     }
 
     try {
-        const result = await device.addCredential(name, secretBytes, type, algorithm, digits, { touchRequired, pinProtected: pinEncrypted });
+        const result = await device.addCredential(name, secretBytes, type, algorithm, digits, {
+            touchRequired,
+            pinProtected: pinEncrypted,
+            login: passwordEnabled ? login : undefined,
+            password: passwordEnabled ? password : undefined,
+            metadata: passwordEnabled ? metadata : undefined,
+            passwordOnly: passwordEnabled && !otpEnabled,
+        });
         if (result.success) {
             showMessage('Credential added successfully!', 'success');
             clearAddForm();
@@ -331,7 +365,14 @@ async function handleAddCredential() {
             showPinModal(async (pin) => {
                 const pinResult = await device.verifyPIN(pin);
                 if (pinResult.success) {
-                    const retryResult = await device.addCredential(name, secretBytes, type, algorithm, digits, { touchRequired, pinProtected: pinEncrypted });
+                    const retryResult = await device.addCredential(name, secretBytes, type, algorithm, digits, {
+                        touchRequired,
+                        pinProtected: pinEncrypted,
+                        login: passwordEnabled ? login : undefined,
+                        password: passwordEnabled ? password : undefined,
+                        metadata: passwordEnabled ? metadata : undefined,
+                        passwordOnly: passwordEnabled && !otpEnabled,
+                    });
                     if (retryResult.success) {
                         showMessage('Credential added successfully!', 'success');
                         clearAddForm();
@@ -353,11 +394,17 @@ async function handleAddCredential() {
 function clearAddForm() {
     document.getElementById('credName').value = '';
     document.getElementById('credSecret').value = '';
+    document.getElementById('credEnableOtp').checked = true;
+    document.getElementById('credEnablePassword').checked = false;
     document.getElementById('credType').value = 'TOTP';
     document.getElementById('credAlgorithm').value = 'SHA1';
     document.getElementById('credDigits').value = '6';
+    document.getElementById('credLogin').value = '';
+    document.getElementById('credPassword').value = '';
+    document.getElementById('credMetadata').value = '';
     document.getElementById('credTouch').checked = false;
     document.getElementById('credPin').checked = false;
+    syncAddForm();
 }
 
 async function handleScanQR() {

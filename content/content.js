@@ -2,9 +2,11 @@
 // Content script for detecting OTP input fields and site matching
 
 let detectedOTPFields = [];
+let detectedPasswordFields = [];
 let matchingCredentials = [];
 let hasRequestedCredentials = false;
 let lastFocusedInput = null;
+const SOLOKEYS_ICON_URL = chrome.runtime.getURL('icons/new-logo-16.png');
 
 // Initialize on page load
 if (document.readyState === 'loading') {
@@ -17,16 +19,24 @@ async function initialize() {
     // Report current site to background script
     reportSite();
 
-    // Check autoDetectOTP setting before running field detection
-    const { autoDetectOTP = true } = await chrome.storage.local.get({ autoDetectOTP: true });
+    const {
+        autoDetectOTP = true,
+        autoDetectPasswords = true,
+    } = await chrome.storage.local.get({
+        autoDetectOTP: true,
+        autoDetectPasswords: true,
+    });
+
     if (autoDetectOTP) {
-        // Detect OTP fields
         detectOTPFields();
+    }
 
-        // Request matching credentials from background
+    if (autoDetectPasswords) {
+        detectPasswordFields();
+    }
+
+    if (autoDetectOTP || autoDetectPasswords) {
         requestMatchingCredentials();
-
-        // Listen for changes (dynamic content)
         observeDOM();
     }
 
@@ -72,6 +82,7 @@ async function requestMatchingCredentials() {
             matchingCredentials = response.credentials;
             // Enhance all detected OTP fields with indicators
             detectedOTPFields.forEach(field => enhanceOTPField(field));
+            detectedPasswordFields.forEach(field => enhancePasswordField(field));
         }
     } catch (error) {
         console.log('Could not get matching credentials:', error);
@@ -93,6 +104,26 @@ function detectOTPFields() {
     });
     
     console.log('SoloKeys TOTP: Detected', detectedOTPFields.length, 'OTP fields');
+}
+
+function detectPasswordFields() {
+    detectedPasswordFields = [];
+    document.querySelectorAll('input[type="password"]').forEach(input => {
+        if (isPasswordField(input)) {
+            detectedPasswordFields.push(input);
+            enhancePasswordField(input);
+        }
+    });
+}
+
+function isPasswordField(input) {
+    const autocomplete = (input.getAttribute('autocomplete') || '').toLowerCase();
+    const name = (input.name || '').toLowerCase();
+    const id = (input.id || '').toLowerCase();
+    return autocomplete.includes('current-password') ||
+        autocomplete.includes('password') ||
+        name.includes('password') ||
+        id.includes('password');
 }
 
 function isOTPField(input) {
@@ -181,22 +212,23 @@ function enhanceOTPField(input) {
     const btn = document.createElement('button');
     btn.className = 'solokeys-autofill-btn';
     btn.title = hasMatches ? 'Autofill with SoloKeys' : 'No matching SoloKeys credentials';
-    btn.innerHTML = '🔐';
+    btn.innerHTML = `<img src="${SOLOKEYS_ICON_URL}" alt="" style="width:16px;height:16px;display:block;">`;
     btn.style.cssText = `
         position: fixed;
         z-index: 2147483647;
         width: 22px; height: 22px;
         padding: 0;
         border: none;
-        border-radius: 3px;
-        background: ${hasMatches ? '#667eea' : '#aaa'};
-        color: white;
+        border-radius: 0;
+        background: transparent;
+        color: inherit;
         font-size: 12px;
         cursor: pointer;
         line-height: 22px;
         text-align: center;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        box-shadow: none;
         display: flex; align-items: center; justify-content: center;
+        opacity: ${hasMatches ? '1' : '0.45'};
     `;
 
     function reposition() {
@@ -225,6 +257,55 @@ function enhanceOTPField(input) {
 
     // Store reference for later updates
     input._solokeyBtn = btn;
+}
+
+function enhancePasswordField(input) {
+    if (input.dataset.solokeyPasswordEnhanced) return;
+    input.dataset.solokeyPasswordEnhanced = 'true';
+
+    const hasMatches = matchingCredentials.some(cred => cred.hasPasswordSafe);
+    const btn = document.createElement('button');
+    btn.className = 'solokeys-password-btn';
+    btn.title = hasMatches ? 'Fill password with SoloKeys' : 'No matching SoloKeys password entries';
+    btn.innerHTML = `<img src="${SOLOKEYS_ICON_URL}" alt="" style="width:16px;height:16px;display:block;">`;
+    btn.style.cssText = `
+        position: fixed;
+        z-index: 2147483647;
+        width: 22px; height: 22px;
+        padding: 0;
+        border: none;
+        border-radius: 0;
+        background: transparent;
+        color: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        line-height: 22px;
+        text-align: center;
+        box-shadow: none;
+        display: flex; align-items: center; justify-content: center;
+        opacity: ${hasMatches ? '1' : '0.45'};
+    `;
+
+    function reposition() {
+        const r = input.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) { btn.style.display = 'none'; return; }
+        btn.style.display = 'flex';
+        btn.style.top  = (r.top  + (r.height - 22) / 2) + 'px';
+        btn.style.left = (r.right - 52) + 'px';
+    }
+
+    btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        showPasswordSelector(input);
+    });
+
+    document.body.appendChild(btn);
+    reposition();
+    const ro = new ResizeObserver(reposition);
+    ro.observe(input);
+    window.addEventListener('scroll', reposition, { passive: true });
+    window.addEventListener('resize', reposition, { passive: true });
+    input._solokeyPasswordBtn = btn;
 }
 
 function parseCredentialName(name) {
@@ -312,7 +393,7 @@ async function showCredentialSelector(input) {
         option.addEventListener('mouseleave', () => { option.style.background = ''; });
         option.addEventListener('click', async () => {
             selector.remove();
-            await generateAndFillOTP(input, cred.name);
+            await generateAndFillOTP(input, cred.rawName || cred.name);
         });
         selector.appendChild(option);
     });
@@ -342,6 +423,126 @@ async function showCredentialSelector(input) {
             }
         });
     }, 0);
+}
+
+async function showPasswordSelector(input) {
+    const existing = document.querySelector('.solokeys-selector');
+    if (existing) existing.remove();
+
+    let creds = matchingCredentials.filter(cred => cred.hasPasswordSafe);
+    if (creds.length === 0) {
+        try {
+            const resp = await chrome.runtime.sendMessage({ action: 'getCredentials' });
+            creds = (resp.credentials || []).filter(cred => cred.hasPasswordSafe);
+        } catch (_) {}
+    }
+
+    if (creds.length === 0) {
+        chrome.runtime.sendMessage({ action: 'openPopup' });
+        return;
+    }
+
+    const selector = document.createElement('div');
+    selector.className = 'solokeys-selector';
+    selector.style.cssText = `
+        position: fixed;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+        z-index: 2147483647;
+        min-width: 220px;
+        max-height: 260px;
+        overflow-y: auto;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 13px;
+    `;
+
+    const header = document.createElement('div');
+    header.textContent = 'Matching password entries';
+    header.style.cssText = `
+        padding: 6px 12px;
+        font-size: 11px;
+        color: #999;
+        background: #fafafa;
+        border-bottom: 1px solid #eee;
+        border-radius: 6px 6px 0 0;
+    `;
+    selector.appendChild(header);
+
+    creds.forEach(cred => {
+        const option = document.createElement('div');
+        option.style.cssText = `
+            padding: 9px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+        `;
+        option.textContent = cred.name;
+        option.addEventListener('mouseenter', () => { option.style.background = '#eef8f2'; });
+        option.addEventListener('mouseleave', () => { option.style.background = ''; });
+        option.addEventListener('click', async () => {
+            selector.remove();
+            await fillPasswordEntry(input, cred.rawName || cred.name);
+        });
+        selector.appendChild(option);
+    });
+
+    document.body.appendChild(selector);
+    const anchor = input._solokeyPasswordBtn ? input._solokeyPasswordBtn.getBoundingClientRect() : input.getBoundingClientRect();
+    selector.style.top = (anchor.bottom + 4) + 'px';
+    selector.style.left = Math.max(8, anchor.right - selector.offsetWidth) + 'px';
+}
+
+function findAssociatedUsernameField(passwordInput) {
+    const form = passwordInput.form || passwordInput.closest('form') || document;
+    const candidates = form.querySelectorAll('input');
+    for (const input of candidates) {
+        if (input === passwordInput) continue;
+        const type = (input.type || '').toLowerCase();
+        const autocomplete = (input.getAttribute('autocomplete') || '').toLowerCase();
+        const name = (input.name || '').toLowerCase();
+        const id = (input.id || '').toLowerCase();
+        if (
+            type === 'email' ||
+            type === 'text' ||
+            autocomplete.includes('username') ||
+            autocomplete.includes('email') ||
+            name.includes('user') ||
+            name.includes('email') ||
+            id.includes('user') ||
+            id.includes('email')
+        ) {
+            return input;
+        }
+    }
+    return null;
+}
+
+async function fillPasswordEntry(passwordInput, credentialName) {
+    const response = await chrome.runtime.sendMessage({
+        action: 'getPasswordEntry',
+        credentialName,
+    });
+    if (!response.success) {
+        if (response.error === 'PIN_REQUIRED') {
+            showNotification('PIN required — open the extension popup', 'warning');
+        } else if (response.error === 'TOUCH_REQUIRED') {
+            showNotification('Touch required on your SoloKeys device', 'info');
+        } else {
+            showNotification(response.error || 'Failed to load password entry', 'error');
+        }
+        return;
+    }
+
+    const entry = response.credential || {};
+    const usernameInput = findAssociatedUsernameField(passwordInput);
+    if (usernameInput && entry.login) {
+        fillInputWithOTP(usernameInput, entry.login);
+    }
+    if (entry.password) {
+        fillInputWithOTP(passwordInput, entry.password);
+    }
+    showNotification('Filled credentials from SoloKeys', 'success');
 }
 
 async function generateAndFillOTP(input, credentialName) {
@@ -487,6 +688,7 @@ function observeDOM() {
         
         if (shouldDetect) {
             detectOTPFields();
+            detectPasswordFields();
         }
     });
     
@@ -562,9 +764,16 @@ function handleMessage(request, sender, sendResponse) {
             detectedOTPFields.forEach(field => {
                 const btn = field._solokeyBtn;
                 if (btn) {
-                    btn.style.background = matchingCredentials.length > 0 ? '#667eea' : '#aaa';
+                    btn.style.opacity = matchingCredentials.length > 0 ? '1' : '0.45';
                 }
                 if (!field.dataset.solokeyEnhanced) enhanceOTPField(field);
+            });
+            detectedPasswordFields.forEach(field => {
+                const btn = field._solokeyPasswordBtn;
+                if (btn) {
+                    btn.style.opacity = matchingCredentials.some(cred => cred.hasPasswordSafe) ? '1' : '0.45';
+                }
+                if (!field.dataset.solokeyPasswordEnhanced) enhancePasswordField(field);
             });
             sendResponse({ received: true });
             break;
@@ -596,18 +805,32 @@ function handleMessage(request, sender, sendResponse) {
             return true; // Keep channel open for async
 
         case 'settingsUpdated': {
-            const autoDetect = request.settings?.autoDetectOTP ?? true;
-            if (!autoDetect) {
-                // Remove all injected icons and clear state
+            const autoDetectOTP = request.settings?.autoDetectOTP ?? true;
+            const autoDetectPasswords = request.settings?.autoDetectPasswords ?? true;
+
+            if (!autoDetectOTP) {
                 detectedOTPFields.forEach(field => {
                     if (field._solokeyBtn) { field._solokeyBtn.remove(); field._solokeyBtn = null; }
                     delete field.dataset.solokeyEnhanced;
                 });
                 detectedOTPFields = [];
-                matchingCredentials = [];
             } else if (detectedOTPFields.length === 0) {
-                // Re-run detection if it was previously disabled
                 detectOTPFields();
+            }
+
+            if (!autoDetectPasswords) {
+                detectedPasswordFields.forEach(field => {
+                    if (field._solokeyPasswordBtn) { field._solokeyPasswordBtn.remove(); field._solokeyPasswordBtn = null; }
+                    delete field.dataset.solokeyPasswordEnhanced;
+                });
+                detectedPasswordFields = [];
+            } else if (detectedPasswordFields.length === 0) {
+                detectPasswordFields();
+            }
+
+            if (!autoDetectOTP && !autoDetectPasswords) {
+                matchingCredentials = [];
+            } else {
                 requestMatchingCredentials();
                 observeDOM();
             }

@@ -17,6 +17,66 @@ let pendingAction = 'display'; // 'display' | 'copy' | 'type'
 let isSyncing = false;
 let currentHostname = '';
 let foundQRCodes = [];
+const PASSWORD_ONLY_PREFIX = '__solo_pw__:';
+const passwordEntryCache = new Map();
+let currentPasswordEntry = null;
+let currentPasswordCacheKey = null;
+let passwordVisible = false;
+
+function isPasswordOnlyCredential(credential) {
+    return credential?.passwordOnly || credential?.type === 'PASSWORD';
+}
+
+function getPasswordCacheKey(credential) {
+    return credential?.rawName || credential?.name;
+}
+
+function buildPasswordLookupNames(credential) {
+    const names = [];
+    if (credential?.passwordOnly) {
+        const prefixed = `${PASSWORD_ONLY_PREFIX}${credential.name}`;
+        if (!names.includes(prefixed)) names.push(prefixed);
+    }
+    const primary = credential?.rawName || credential?.name;
+    if (primary && !names.includes(primary)) names.push(primary);
+    if (credential?.name && !names.includes(credential.name)) {
+        names.push(credential.name);
+    }
+    return names;
+}
+
+function getCachedPasswordEntry(cacheKey) {
+    const cached = passwordEntryCache.get(cacheKey);
+    if (!cached) return null;
+    if (cached.expiresAt <= Date.now()) {
+        passwordEntryCache.delete(cacheKey);
+        return null;
+    }
+    return cached;
+}
+
+function storeCachedPasswordEntry(cacheKey, entry) {
+    passwordEntryCache.set(cacheKey, {
+        entry,
+        expiresAt: Date.now() + 60_000,
+        usedLogin: false,
+        usedPassword: false,
+    });
+}
+
+function markCachedPasswordFieldUsed(cacheKey, field) {
+    const cached = getCachedPasswordEntry(cacheKey);
+    if (!cached) return;
+    if (field === 'login') cached.usedLogin = true;
+    if (field === 'password') cached.usedPassword = true;
+    const loginDone = cached.usedLogin || !cached.entry?.login;
+    const passwordDone = cached.usedPassword || !cached.entry?.password;
+    if (loginDone && passwordDone) {
+        passwordEntryCache.delete(cacheKey);
+    } else {
+        passwordEntryCache.set(cacheKey, cached);
+    }
+}
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
@@ -30,6 +90,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 function setupEventListeners() {
     document.getElementById('connectBtn').addEventListener('click', handleConnect);
     document.getElementById('copyBtn').addEventListener('click', handleCopyOTP);
+    document.getElementById('copyLoginBtn').addEventListener('click', handleCopyLogin);
+    document.getElementById('copyPasswordBtn').addEventListener('click', handleCopyPassword);
+    document.getElementById('togglePasswordBtn').addEventListener('click', togglePasswordVisibility);
+    document.getElementById('quickEnableOtp')?.addEventListener('change', syncQuickAddForm);
+    document.getElementById('quickEnablePassword')?.addEventListener('change', syncQuickAddForm);
     document.getElementById('optionsLink').addEventListener('click', handleOpenOptions);
     document.getElementById('pinSubmitBtn').addEventListener('click', handlePinSubmit);
     document.getElementById('pinCancelBtn').addEventListener('click', handlePinCancel);
@@ -178,6 +243,10 @@ async function connectToDevice(silent = false) {
 // Generate OTP then execute the requested action.
 // action: 'display' (show in panel) | 'copy' (to clipboard) | 'type' (fill page)
 async function generateOTP(credential, action = 'display') {
+    if (isPasswordOnlyCredential(credential)) {
+        return handlePasswordEntry(credential, action);
+    }
+
     if (!isConnected || !device) {
         // Try to connect first
         try {
@@ -190,16 +259,16 @@ async function generateOTP(credential, action = 'display') {
     }
 
     currentCredential = credential;
-    pendingCredentialName = credential.name;
+    pendingCredentialName = credential.rawName || credential.name;
     pendingAction = action;
 
     try {
-        const otp = await device.calculateOTP(credential.name);
+        const otp = await device.calculateOTP(credential.rawName || credential.name);
         executeOTPAction(otp, credential, action);
     } catch (error) {
         if (error.type === 'TOUCH_REQUIRED') {
             showTouchOverlay();
-            pollForTouch(credential.name);
+            pollForTouch(credential.rawName || credential.name);
         } else if (error.type === 'PIN_REQUIRED') {
             showPinModal();
         } else {
@@ -207,6 +276,84 @@ async function generateOTP(credential, action = 'display') {
             // Connection might be stale, mark as disconnected
             isConnected = false;
             updateConnectionStatus(false, credentials.length, true);
+        }
+    }
+}
+
+async function handlePasswordEntry(credential, action = 'display') {
+    if (!isConnected || !device) {
+        try {
+            showMessage('Connecting to Solo 2...', 'info');
+            await connectToDevice();
+        } catch (error) {
+            showMessage('Insert your Solo 2 to load the password', 'info');
+            return;
+        }
+    }
+
+    currentCredential = credential;
+    pendingCredentialName = credential.rawName || credential.name;
+    pendingAction = action;
+
+    const cacheKey = getPasswordCacheKey(credential);
+
+    try {
+        let entry = getCachedPasswordEntry(cacheKey)?.entry;
+        if (!entry) {
+            let lastError = null;
+            let emptyEntry = null;
+            for (const lookupName of buildPasswordLookupNames(credential)) {
+                const result = await device.getPasswordEntry(lookupName);
+                if (!result.success) {
+                    lastError = { type: result.error, message: result.error };
+                    continue;
+                }
+
+                const candidate = result.credential || {};
+                if (candidate.password || candidate.login || candidate.metadata) {
+                    entry = candidate;
+                    break;
+                }
+
+                if (!emptyEntry) {
+                    emptyEntry = candidate;
+                }
+            }
+
+            if (!entry) {
+                if (lastError) {
+                    throw lastError;
+                }
+                entry = emptyEntry;
+            }
+            if (entry && (entry.password || entry.login || entry.metadata)) {
+                storeCachedPasswordEntry(cacheKey, entry);
+            }
+        }
+
+        const value = entry.password || entry.login || '';
+        if (!value) {
+            showMessage('No password data stored for this credential', 'info');
+            return;
+        }
+
+        if (action === 'copy') {
+            await navigator.clipboard.writeText(value);
+            markCachedPasswordFieldUsed(cacheKey, entry.password ? 'password' : 'login');
+            showMessage('Password copied to clipboard', 'success');
+        } else if (action === 'type') {
+            executeOTPAction(value, credential, 'type');
+            markCachedPasswordFieldUsed(cacheKey, entry.password ? 'password' : 'login');
+        } else {
+            displayPassword(entry, credential);
+        }
+    } catch (error) {
+        if (error.type === 'TOUCH_REQUIRED') {
+            showMessage('Touch required on your SoloKeys device', 'info');
+        } else if (error.type === 'PIN_REQUIRED') {
+            showPinModal();
+        } else {
+            showMessage(error.message || 'Failed to load password entry', 'error');
         }
     }
 }
@@ -326,7 +473,11 @@ function renderCredentials() {
             ? '<div class="message info" style="margin:0 0 8px;">Showing cached credentials — insert your Solo 2 to generate codes</div>'
             : '';
         list.innerHTML = cachedBanner + credentials.map(cred =>
-            createCredentialItem(cred, matchingCredentials.some(m => m.name === cred.name), cached)
+            createCredentialItem(
+                cred,
+                matchingCredentials.some(m => (m.rawName || m.name) === (cred.rawName || cred.name)),
+                cached
+            )
         ).join('');
         attachCredentialHandlers(list, credentials, cached);
     }
@@ -334,27 +485,49 @@ function renderCredentials() {
 
 function attachCredentialHandlers(container, credList, cached) {
     credList.forEach(cred => {
-        const el = container.querySelector(`[data-name="${CSS.escape(cred.name)}"]`);
+        const el = container.querySelector(`[data-name="${CSS.escape(cred.rawName || cred.name)}"]`);
         if (!el) return;
 
         // Row click (not on action buttons) → show OTP display panel
         el.addEventListener('click', (e) => {
             if (e.target.closest('.btn-row')) return;
             if (cached) {
-                showMessage('Insert your Solo 2 to generate a code', 'info');
+                showMessage(
+                    isPasswordOnlyCredential(cred)
+                        ? 'Insert your Solo 2 to load the password'
+                        : 'Insert your Solo 2 to generate a code',
+                    'info'
+                );
             } else {
-                generateOTP(cred, 'display');
+                if (isPasswordOnlyCredential(cred)) {
+                    handlePasswordEntry(cred, 'display');
+                } else {
+                    generateOTP(cred, 'display');
+                }
             }
         });
 
         el.querySelector('.type-btn')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            generateOTP(cred, 'type');
+            if (isPasswordOnlyCredential(cred)) {
+                handlePasswordEntry(cred, 'type');
+            } else {
+                generateOTP(cred, 'type');
+            }
         });
 
         el.querySelector('.copy-btn')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            generateOTP(cred, 'copy');
+            if (isPasswordOnlyCredential(cred)) {
+                handlePasswordEntry(cred, 'copy');
+            } else {
+                generateOTP(cred, 'copy');
+            }
+        });
+
+        el.querySelector('.password-btn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handlePasswordEntry(cred, 'display');
         });
     });
 }
@@ -370,13 +543,20 @@ function createCredentialItem(cred, isMatching, isCached = false) {
         ? `<span class="cred-domain">${escapeHtml(domain)}</span><span class="cred-sep">:</span><span class="cred-username">${escapeHtml(username)}</span>`
         : `<span class="cred-domain">${escapeHtml(domain)}</span>`;
 
-    const actionButtons = isCached ? '' : `
-        <button class="btn-row type-btn" title="Type into focused field">Type</button>
-        <button class="btn-row copy-btn" title="Copy to clipboard">Copy</button>
-    `;
+    const actionButtons = isCached ? '' : (
+        isPasswordOnlyCredential(cred)
+            ? `
+                <button class="btn-row password-btn" title="Show username and password actions">Open</button>
+            `
+            : `
+                <button class="btn-row type-btn" title="Type into focused field">Type</button>
+                <button class="btn-row copy-btn" title="Copy to clipboard">Copy</button>
+                ${cred.hasPasswordSafe ? '<button class="btn-row password-btn" title="Show username and password actions">PW</button>' : ''}
+            `
+    );
 
     return `
-        <div class="credential-item ${isMatching ? 'matching' : ''}" data-name="${escapeHtml(cred.name)}">
+        <div class="credential-item ${isMatching ? 'matching' : ''}" data-name="${escapeHtml(cred.rawName || cred.name)}">
             <div style="min-width:0; flex:1;">
                 ${badges.length ? `<div class="credential-badges">${badges.join('')}</div>` : ''}
                 <div class="credential-name">${nameHtml}</div>
@@ -391,6 +571,9 @@ function createCredentialItem(cred, isMatching, isCached = false) {
 
 function displayOTP(otp, credential) {
     currentOTP = otp;
+    currentPasswordEntry = null;
+    currentPasswordCacheKey = null;
+    passwordVisible = false;
     const { domain, username } = parseCredentialName(credential.name);
     const nameEl = document.getElementById('otpCredentialName');
     nameEl.textContent = '';
@@ -409,8 +592,47 @@ function displayOTP(otp, credential) {
         nameEl.appendChild(userSpan);
     }
     document.getElementById('otpCode').textContent = otp;
+    document.getElementById('otpTimer').style.display = '';
+    document.getElementById('copyBtn').innerHTML = '<span>📋</span> Copy to Clipboard';
+    document.getElementById('copyBtn').classList.remove('hidden');
+    document.getElementById('passwordDetail').classList.add('hidden');
     document.getElementById('otpSection').classList.remove('hidden');
     startOTPTimer();
+}
+
+function displayPassword(entry, credential) {
+    currentOTP = entry.password || entry.login || '';
+    currentPasswordEntry = entry;
+    currentPasswordCacheKey = getPasswordCacheKey(credential);
+    passwordVisible = false;
+    if (timerInterval) clearInterval(timerInterval);
+    const { domain, username } = parseCredentialName(credential.name);
+    const nameEl = document.getElementById('otpCredentialName');
+    nameEl.textContent = '';
+    const domainSpan = document.createElement('span');
+    domainSpan.className = 'cred-domain';
+    domainSpan.textContent = domain;
+    nameEl.appendChild(domainSpan);
+    if (username) {
+        const sep = document.createElement('span');
+        sep.className = 'cred-sep';
+        sep.textContent = ':';
+        const userSpan = document.createElement('span');
+        userSpan.className = 'cred-username';
+        userSpan.textContent = username;
+        nameEl.appendChild(sep);
+        nameEl.appendChild(userSpan);
+    }
+    document.getElementById('otpCode').textContent = '';
+    document.getElementById('otpTimer').style.display = 'none';
+    document.getElementById('copyBtn').classList.add('hidden');
+    document.getElementById('passwordDetail').classList.remove('hidden');
+    document.getElementById('loginRow').style.display = entry.login ? '' : 'none';
+    document.getElementById('passwordRow').style.display = entry.password ? '' : 'none';
+    document.getElementById('loginValue').textContent = entry.login || '-';
+    document.getElementById('passwordValue').textContent = entry.password ? '***' : '-';
+    document.getElementById('togglePasswordBtn').textContent = 'Show';
+    document.getElementById('otpSection').classList.remove('hidden');
 }
 
 function startOTPTimer() {
@@ -446,6 +668,41 @@ async function handleCopyOTP() {
     }
 }
 
+async function handleCopyLogin() {
+    if (!currentPasswordEntry?.login) return;
+    try {
+        await navigator.clipboard.writeText(currentPasswordEntry.login);
+        if (currentPasswordCacheKey) {
+            markCachedPasswordFieldUsed(currentPasswordCacheKey, 'login');
+        }
+        showMessage('Username copied to clipboard', 'success');
+    } catch (error) {
+        showMessage('Failed to copy username', 'error');
+    }
+}
+
+async function handleCopyPassword() {
+    if (!currentPasswordEntry?.password) return;
+    try {
+        await navigator.clipboard.writeText(currentPasswordEntry.password);
+        if (currentPasswordCacheKey) {
+            markCachedPasswordFieldUsed(currentPasswordCacheKey, 'password');
+        }
+        showMessage('Password copied to clipboard', 'success');
+    } catch (error) {
+        showMessage('Failed to copy password', 'error');
+    }
+}
+
+function togglePasswordVisibility() {
+    if (!currentPasswordEntry?.password) return;
+    passwordVisible = !passwordVisible;
+    document.getElementById('passwordValue').textContent = passwordVisible
+        ? currentPasswordEntry.password
+        : '***';
+    document.getElementById('togglePasswordBtn').textContent = passwordVisible ? 'Hide' : 'Show';
+}
+
 function handleOpenOptions(e) {
     e.preventDefault();
     chrome.runtime.openOptionsPage();
@@ -473,8 +730,14 @@ async function handlePinSubmit() {
             showMessage('PIN verified successfully', 'success');
 
             if (pendingCredentialName) {
-                const cred = credentials.find(c => c.name === pendingCredentialName);
-                if (cred) generateOTP(cred, pendingAction);
+                const cred = credentials.find(c => (c.rawName || c.name) === pendingCredentialName);
+                if (cred) {
+                    if (isPasswordOnlyCredential(cred)) {
+                        handlePasswordEntry(cred, pendingAction);
+                    } else {
+                        generateOTP(cred, pendingAction);
+                    }
+                }
             }
         } else {
             showMessage(result.message || 'Invalid PIN', 'error');
@@ -510,6 +773,13 @@ function showMessage(text, type) {
     setTimeout(() => { msg.remove(); }, 5000);
 }
 
+function syncQuickAddForm() {
+    const otpEnabled = document.getElementById('quickEnableOtp')?.checked ?? true;
+    const passwordEnabled = document.getElementById('quickEnablePassword')?.checked ?? false;
+    document.getElementById('quickOtpFields').classList.toggle('hidden', !otpEnabled);
+    document.getElementById('quickPasswordFields').classList.toggle('hidden', !passwordEnabled);
+}
+
 // Quick Add Credential Functions
 function toggleQuickAdd() {
     const form = document.getElementById('quickAddForm');
@@ -527,6 +797,12 @@ function toggleQuickAdd() {
         // Clear username and focus it
         const usernameInput = document.getElementById('quickCredUsername');
         usernameInput.value = '';
+        document.getElementById('quickEnableOtp').checked = true;
+        document.getElementById('quickEnablePassword').checked = false;
+        document.getElementById('quickCredSecret').value = '';
+        document.getElementById('quickCredLogin').value = '';
+        document.getElementById('quickCredPassword').value = '';
+        syncQuickAddForm();
         usernameInput.focus();
     } else {
         form.classList.add('hidden');
@@ -538,7 +814,11 @@ function toggleQuickAdd() {
 async function handleQuickAddCredential() {
     const domain = document.getElementById('quickCredDomain').value.trim();
     const username = document.getElementById('quickCredUsername').value.trim();
+    const otpEnabled = document.getElementById('quickEnableOtp').checked;
+    const passwordEnabled = document.getElementById('quickEnablePassword').checked;
     const secretInput = document.getElementById('quickCredSecret');
+    const login = document.getElementById('quickCredLogin').value;
+    const password = document.getElementById('quickCredPassword').value;
     const touchRequired = document.getElementById('quickCredTouch').checked;
     const pinProtected = document.getElementById('quickCredPin').checked;
 
@@ -549,9 +829,9 @@ async function handleQuickAddCredential() {
 
     const name = username ? `${domain}:${username}` : domain;
     const secret = secretInput.value.trim();
-    
-    if (!secret) {
-        showMessage('Please enter or scan a secret key', 'error');
+
+    if (!otpEnabled && !passwordEnabled) {
+        showMessage('Enable OTP, Password Safe, or both', 'error');
         return;
     }
     
@@ -566,21 +846,36 @@ async function handleQuickAddCredential() {
         }
     }
     
-    // Decode secret
     let secretBytes;
-    try {
-        secretBytes = base32Decode(secret);
-    } catch (error) {
-        showMessage('Invalid secret key format. Must be Base32 encoded.', 'error');
-        return;
+    if (otpEnabled) {
+        if (!secret) {
+            showMessage('Please enter or scan a secret key', 'error');
+            return;
+        }
+        try {
+            secretBytes = base32Decode(secret);
+        } catch (error) {
+            showMessage('Invalid secret key format. Must be Base32 encoded.', 'error');
+            return;
+        }
+    } else {
+        secretBytes = crypto.getRandomValues(new Uint8Array(20));
     }
     
     try {
-        const result = await device.addCredential(name, secretBytes, 'TOTP', 'SHA1', 6, { touchRequired, pinProtected });
+        const result = await device.addCredential(name, secretBytes, 'TOTP', 'SHA1', 6, {
+            touchRequired,
+            pinProtected,
+            login: passwordEnabled ? login : undefined,
+            password: passwordEnabled ? password : undefined,
+            passwordOnly: passwordEnabled && !otpEnabled,
+        });
         if (result.success) {
             showMessage('Credential added successfully!', 'success');
             document.getElementById('quickCredUsername').value = '';
             secretInput.value = '';
+            document.getElementById('quickCredLogin').value = '';
+            document.getElementById('quickCredPassword').value = '';
             document.getElementById('quickCredTouch').checked = false;
             document.getElementById('quickCredPin').checked = false;
             toggleQuickAdd();

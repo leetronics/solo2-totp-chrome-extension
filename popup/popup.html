@@ -201,6 +201,44 @@
             border-color: #999;
         }
 
+        .detail-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .password-detail {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .password-row {
+            display: grid;
+            grid-template-columns: 78px 1fr auto auto;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .password-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .password-value {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 13px;
+            color: #111;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+        }
+
         .credential-badges {
             display: flex;
             gap: 4px;
@@ -466,8 +504,28 @@
                     <span style="color: #999; font-weight: bold; flex-shrink: 0;">:</span>
                     <input type="text" id="quickCredUsername" placeholder="username (optional)" style="flex: 1.4; min-width: 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;">
                 </div>
+                <div class="checkbox-group" style="margin-bottom: 8px;">
+                    <label class="checkbox-item" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px;">
+                        <input type="checkbox" id="quickEnableOtp" checked style="width: 16px; height: 16px;">
+                        <span>OTP</span>
+                    </label>
+                    <label class="checkbox-item" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px;">
+                        <input type="checkbox" id="quickEnablePassword" style="width: 16px; height: 16px;">
+                        <span>Password Safe</span>
+                    </label>
+                </div>
+                <div id="quickOtpFields">
                 <div class="form-group">
                     <input type="text" id="quickCredSecret" placeholder="Secret key (Base32)" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 8px;">
+                </div>
+                </div>
+                <div id="quickPasswordFields" class="hidden">
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <input type="text" id="quickCredLogin" placeholder="Login / username" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <input type="password" id="quickCredPassword" placeholder="Password" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;">
+                    </div>
                 </div>
                 <div class="checkbox-group" style="margin-bottom: 8px;">
                     <label class="checkbox-item" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px;">
@@ -506,6 +564,20 @@
             <button class="btn btn-copy" id="copyBtn">
                 <span>📋</span> Copy to Clipboard
             </button>
+            <div class="password-detail hidden" id="passwordDetail">
+                <div class="password-row" id="loginRow">
+                    <div class="password-label">Username</div>
+                    <div class="password-value" id="loginValue">-</div>
+                    <button class="btn-row" id="copyLoginBtn">Copy</button>
+                    <div></div>
+                </div>
+                <div class="password-row" id="passwordRow">
+                    <div class="password-label">Password</div>
+                    <div class="password-value" id="passwordValue">***</div>
+                    <button class="btn-row" id="togglePasswordBtn">Show</button>
+                    <button class="btn-row" id="copyPasswordBtn">Copy</button>
+                </div>
+            </div>
         </div>
         
         <!-- Matching Credentials -->

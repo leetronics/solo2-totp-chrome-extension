@@ -1,5 +1,5 @@
 // background/service-worker.js
-// Background service worker for SoloKeys TOTP extension
+// Background service worker for SoloKeys Secrets extension
 // Handles device management through popup relay (WebHID not available in service workers)
 
 import { matchesSite } from '../lib/utils.js';
@@ -19,7 +19,7 @@ chrome.runtime.onInstalled.addListener(initialize);
 // No JS icon setting - rely on manifest theme_icons
 
 async function initialize() {
-    console.log('SoloKeys TOTP: Service worker initialized');
+    console.log('SoloKeys Secrets: Service worker initialized');
     
     // Load cached credentials so popup can show them when device is disconnected
     const stored = await chrome.storage.local.get(['credentialCache', 'connectionState']);
@@ -29,7 +29,7 @@ async function initialize() {
     
     // Restore connection state if we were previously connected
     if (stored.connectionState?.wasConnected) {
-        console.log('SoloKeys TOTP: Previous connection detected, will auto-reconnect on next use');
+        console.log('SoloKeys Secrets: Previous connection detected, will auto-reconnect on next use');
     }
     
     // Update badge with any cached matches
@@ -115,6 +115,9 @@ async function handleMessage(request, sender) {
         case 'retryAfterTouch':
             return handleGenerateOTP(request.credentialName);
 
+        case 'getPasswordEntry':
+            return handleGetPasswordEntry(request.credentialName);
+
         default:
             // Unknown actions are handled by popup
             return { error: 'Unknown action in background: ' + request.action };
@@ -162,9 +165,29 @@ async function handleGenerateOTP(credentialName) {
 
     return new Promise(resolve => {
         chrome.runtime.sendNativeMessage(
-            'com.solokeys.totp',
+            'com.solokeys.secrets',
             { action: 'calculateOTP', name: credentialName,
-              clientId: extensionClientId, clientName: 'SoloKeys TOTP – Chrome' },
+              clientId: extensionClientId, clientName: 'SoloKeys Secrets – Chrome' },
+            (response) => {
+                if (chrome.runtime.lastError) {
+                    resolve({ success: false, error: chrome.runtime.lastError.message });
+                } else {
+                    resolve(response);
+                }
+            }
+        );
+    });
+}
+
+async function handleGetPasswordEntry(credentialName) {
+    const { extensionClientId } = await chrome.storage.local.get(['extensionClientId']);
+    if (!extensionClientId) return { success: false, error: 'Not paired with SoloKeys GUI' };
+
+    return new Promise(resolve => {
+        chrome.runtime.sendNativeMessage(
+            'com.solokeys.secrets',
+            { action: 'getPasswordEntry', name: credentialName,
+              clientId: extensionClientId, clientName: 'SoloKeys Secrets – Chrome' },
             (response) => {
                 if (chrome.runtime.lastError) {
                     resolve({ success: false, error: chrome.runtime.lastError.message });

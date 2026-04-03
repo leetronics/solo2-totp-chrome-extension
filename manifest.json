@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "SoloKeys TOTP",
+  "name": "SoloKeys Secrets",
   "version": "1.0.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvTwa5wBLpiK0zE9k2VW4GozOL7DHr21hc9ROcAB/NQTZMXXvWq8fl6haSgR/FhEAdGAJrtU61LnBoNRilRLnzdNc+9G5ZOG8WvIUhx0BngbSzkoXdpcCiVrxiMnfBBnJj8ZMZlDmq8HgumoDbVvR0TwL/lJ47yttb15F7+qQbJjbLHGCNYfEfRLhsLzhGw8MzBMLZ+hT+u+X6KU3p8DQCh25f6Un6FWcjN6AAApeOW5n4AWjB2eNfaMUhn1snmy9eHaw1aeoZmULs+XduZ1OeaE9mwJvfIQ9qA7jADonacLHHejmJmMGt2FDSzTx4Y3kNrkDPaPF2NWanb82lCbh7QIDAQAB",
-  "description": "TOTP provider for SoloKeys 2 security keys",
+  "description": "OTP and password-safe companion for SoloKeys 2 security keys",
   "permissions": [
     "storage",
     "activeTab",

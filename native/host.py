@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-SoloKeys TOTP Chrome Extension - Native Messaging Host (thin bridge)
+SoloKeys Secrets Chrome Extension - Native Messaging Host (thin bridge)
 
 Reads one JSON message from Chrome (stdin framing), forwards it to the
 solokeys-gui Unix socket, and writes the response back to Chrome.
 
-solokeys-gui must be running for OTP generation to work.
+solokeys-gui must be running for browser-mediated secrets actions to work.
 """
 
 import json
@@ -13,7 +13,7 @@ import struct
 import sys
 from pathlib import Path
 
-_SOCKET_PATH = Path.home() / ".local/share/solokeys-gui/totp.sock"
+_SOCKET_PATH = Path.home() / ".local/share/solokeys-gui/secrets.sock"
 
 
 def read_message():
