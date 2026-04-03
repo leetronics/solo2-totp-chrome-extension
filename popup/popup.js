@@ -24,6 +24,26 @@ let currentPasswordCacheKey = null;
 let passwordVisible = false;
 let reconnectInFlight = null;
 
+function isExpectedConnectionError(error) {
+    const message = String(error?.message || error || '').toLowerCase();
+    return (
+        message.includes('native host') ||
+        message.includes('gui is not running') ||
+        message.includes('not found') ||
+        message.includes('timeout') ||
+        message.includes('socket') ||
+        message.includes('host')
+    );
+}
+
+function logConnectionIssue(context, error) {
+    if (isExpectedConnectionError(error)) {
+        console.warn(`${context}: ${error?.message || error}`);
+        return;
+    }
+    console.error(context, error);
+}
+
 function isPasswordOnlyCredential(credential) {
     return credential?.passwordOnly || credential?.type === 'PASSWORD';
 }
@@ -216,7 +236,7 @@ async function handleConnect() {
         await connectToDevice(false, { refreshCredentials: true });
         helpText.style.display = 'none';
     } catch (error) {
-        console.error('Connection error:', error);
+        logConnectionIssue('Connection error', error);
         showMessage('Connection failed: ' + error.message, 'error');
         updateConnectionStatus(false, credentials.length, isCachedWhileOffline());
         helpText.style.display = 'block';

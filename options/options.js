@@ -7,6 +7,26 @@ let isConnected = false;
 let credentials = [];
 let device = null;
 
+function isExpectedConnectionError(error) {
+    const message = String(error?.message || error || '').toLowerCase();
+    return (
+        message.includes('native host') ||
+        message.includes('gui is not running') ||
+        message.includes('not found') ||
+        message.includes('timeout') ||
+        message.includes('socket') ||
+        message.includes('host')
+    );
+}
+
+function logConnectionIssue(context, error) {
+    if (isExpectedConnectionError(error)) {
+        console.warn(`${context}: ${error?.message || error}`);
+        return;
+    }
+    console.error(context, error);
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
@@ -152,7 +172,7 @@ async function handleConnect() {
     try {
         await connectToDevice(false);
     } catch (error) {
-        console.error('Connection error:', error);
+        logConnectionIssue('Connection error', error);
         showMessage('Connection failed: ' + error.message, 'error');
         if (helpText) {
             helpText.style.display = 'block';
@@ -187,7 +207,7 @@ async function connectToDevice(silent = false) {
             pinVerified: false
         });
     } catch (error) {
-        console.error('Failed to connect to Solo 2:', error);
+        logConnectionIssue('Failed to connect to Solo 2', error);
         showMessage('Failed to connect: ' + error.message, 'error');
         const connectBtn = document.getElementById('connectBtn');
         connectBtn.textContent = 'Connect to Solo 2';
