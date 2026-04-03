@@ -485,9 +485,9 @@
         <div id="messageArea"></div>
         
         <!-- Device Connection -->
-        <div class="device-section" id="deviceSection">
-            <p id="deviceStatus">Solo 2 not connected</p>
-            <button class="btn" id="connectBtn">Connect to Solo 2</button>
+        <div class="device-section hidden" id="deviceSection">
+            <p id="deviceStatus"></p>
+            <button class="btn" id="connectBtn" style="display: none;">Connect to Solo 2</button>
             <p id="connectHelp" style="font-size: 11px; color: #888; margin-top: 8px; display: none;">
                 Connecting to Solo 2…
             </p>
@@ -591,8 +591,7 @@
         <!-- All Credentials -->
         <div>
             <div class="section-title">
-                <span>All Credentials</span>
-                <span id="credentialCount" style="color: #999;">0</span>
+                <span id="allCredentialsTitle">ALL CREDENTIALS (0)</span>
             </div>
             <div class="credential-list" id="credentialList">
                 <div class="empty-state">

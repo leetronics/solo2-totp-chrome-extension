@@ -23,6 +23,29 @@ let currentPasswordEntry = null;
 let currentPasswordCacheKey = null;
 let passwordVisible = false;
 let reconnectInFlight = null;
+let messageTimeoutId = null;
+let showCachedFallback = false;
+
+async function syncConnectionState(connected, pinVerified = false) {
+    try {
+        await chrome.runtime.sendMessage({
+            action: 'setConnectionState',
+            connected,
+            pinVerified,
+        });
+    } catch (error) {
+        console.warn('Failed to sync connection state:', error);
+    }
+}
+
+async function markDisconnected(keepCachedCredentials = true) {
+    isConnected = false;
+    device = null;
+    if (!keepCachedCredentials) {
+        credentials = [];
+    }
+    await syncConnectionState(false, false);
+}
 
 function isExpectedConnectionError(error) {
     const message = String(error?.message || error || '').toLowerCase();
@@ -132,11 +155,17 @@ function setupEventListeners() {
 async function loadStateFromBackground() {
     try {
         const response = await chrome.runtime.sendMessage({ action: 'getDeviceState' });
-        isConnected = response.connected;
         credentials = response.credentials || [];
-        
-        // Always show credentials (cached or live)
-        updateConnectionStatus(isConnected, credentials.length, response.cached, response.reconnecting);
+        showCachedFallback = false;
+
+        // Render cached state optimistically like a live connection.
+        // If the silent probe fails afterwards, we switch to explicit cached UI.
+        isConnected = false;
+        if (credentials.length > 0 || response.cached) {
+            updateConnectionStatus(true, credentials.length, false, false);
+        } else {
+            updateConnectionStatus(false, credentials.length, false);
+        }
         renderCredentials();
     } catch (error) {
         console.error('Failed to load state:', error);
@@ -144,13 +173,15 @@ async function loadStateFromBackground() {
         const stored = await chrome.storage.local.get(['credentialCache']);
         if (stored.credentialCache?.credentials) {
             credentials = stored.credentialCache.credentials;
+            showCachedFallback = false;
+            updateConnectionStatus(true, credentials.length, false, false);
             renderCredentials();
         }
     }
 }
 
 function isCachedWhileOffline() {
-    return !isConnected && credentials.length > 0;
+    return !isConnected && showCachedFallback && credentials.length > 0;
 }
 
 async function silentConnect() {
@@ -159,16 +190,21 @@ async function silentConnect() {
         isSyncing = true;
         const probe = await chrome.runtime.sendMessage({ action: 'probeDevice' });
         if (probe?.connected) {
+            credentials = probe.credentials || credentials;
+            showCachedFallback = false;
             isConnected = true;
             updateConnectionStatus(true, credentials.length);
-            if (credentials.length === 0) {
-                await connectToDevice(true, { refreshCredentials: true });
-            }
+            renderCredentials();
             return;
         }
-        await connectToDevice(true, { refreshCredentials: credentials.length === 0 });
+        await markDisconnected(true);
+        showCachedFallback = credentials.length > 0;
+        updateConnectionStatus(false, credentials.length, showCachedFallback);
+        renderCredentials();
     } catch (_) {
-        // Fail silently — GUI/device not available; show Connect button
+        showCachedFallback = credentials.length > 0;
+        updateConnectionStatus(false, credentials.length, showCachedFallback);
+        renderCredentials();
     } finally {
         isSyncing = false;
     }
@@ -191,36 +227,49 @@ async function checkCurrentSite() {
     }
 }
 
-function updateConnectionStatus(connected, count, isCached = false, reconnecting = false) {
+function updateConnectionStatus(
+    connected,
+    count,
+    isCached = false,
+    affectConnectionState = true,
+) {
+    const deviceSection = document.getElementById('deviceSection');
     const indicator = document.getElementById('statusIndicator');
     const statusText = document.getElementById('deviceStatus');
     const connectBtn = document.getElementById('connectBtn');
+    const helpText = document.getElementById('connectHelp');
+
+    deviceSection.classList.toggle('hidden', connected);
+    connectBtn.style.display = 'none';
+    connectBtn.disabled = false;
+    if (helpText) {
+        helpText.style.display = 'none';
+    }
 
     if (connected) {
         indicator.classList.add('connected');
-        statusText.textContent = `Solo 2 connected • ${count} credentials`;
-        connectBtn.style.display = 'none';
-        isConnected = true;
-    } else if (reconnecting) {
-        indicator.classList.add('connected');
-        statusText.textContent = `Reconnecting… • ${count} cached credential${count !== 1 ? 's' : ''}`;
-        connectBtn.textContent = 'Reconnect now';
-        connectBtn.style.display = 'block';
-        connectBtn.disabled = false;
-        isConnected = false;
+        statusText.textContent = '';
+        if (affectConnectionState) {
+            isConnected = true;
+        }
     } else if (isCached) {
         indicator.classList.remove('connected');
-        statusText.textContent = `Cached • ${count} credentials`;
-        connectBtn.textContent = 'Connect to Solo 2';
-        connectBtn.style.display = 'block';
-        isConnected = false;
+        statusText.textContent = `Showing ${count} cached credential${count !== 1 ? 's' : ''}`;
+        if (affectConnectionState) {
+            isConnected = false;
+        }
     } else {
         indicator.classList.remove('connected');
-        statusText.textContent = 'Solo 2 not connected';
-        connectBtn.textContent = 'Connect to Solo 2';
-        connectBtn.style.display = 'block';
-        isConnected = false;
+        statusText.textContent = 'Insert your Solo 2 to access credentials';
+        if (affectConnectionState) {
+            isConnected = false;
+        }
     }
+}
+
+function updateCredentialSectionTitle() {
+    const title = document.getElementById('allCredentialsTitle');
+    title.textContent = `ALL CREDENTIALS (${credentials.length})`;
 }
 
 async function handleConnect() {
@@ -233,7 +282,7 @@ async function handleConnect() {
     helpText.textContent = 'Connecting to Solo 2…';
 
     try {
-        await connectToDevice(false, { refreshCredentials: true });
+        await connectToDevice(false);
         helpText.style.display = 'none';
     } catch (error) {
         logConnectionIssue('Connection error', error);
@@ -248,37 +297,40 @@ async function handleConnect() {
     }
 }
 
-async function connectToDevice(silent = false, options = {}) {
-    const { refreshCredentials = true } = options;
-
+async function connectToDevice(silent = false) {
     if (reconnectInFlight) {
         return reconnectInFlight;
     }
 
     reconnectInFlight = (async () => {
         device = new NativeTransport();
-        await device.connect(5000);
+        try {
+            await device.connect(5000);
+            const creds = await device.listCredentials();
 
-        let creds = credentials;
-        if (refreshCredentials) {
-            creds = await device.listCredentials();
-        }
+            credentials = creds;
+            isConnected = true;
 
-        credentials = creds;
-        isConnected = true;
+            await chrome.runtime.sendMessage({
+                action: 'updateDeviceState',
+                connected: true,
+                credentials: creds,
+                pinVerified: false
+            });
 
-        await chrome.runtime.sendMessage({
-            action: 'updateDeviceState',
-            connected: true,
-            credentials: creds,
-            pinVerified: false
-        });
+            updateConnectionStatus(true, creds.length);
+            renderCredentials();
+            clearMessage();
 
-        updateConnectionStatus(true, creds.length);
-        renderCredentials();
-
-        if (!silent) {
-            showMessage('Solo 2 connected!', 'success');
+            if (!silent) {
+                showMessage('Solo 2 connected!', 'success');
+            }
+        } catch (error) {
+            await markDisconnected(true);
+            showCachedFallback = credentials.length > 0;
+            updateConnectionStatus(false, credentials.length, showCachedFallback);
+            renderCredentials();
+            throw error;
         }
     })();
 
@@ -299,8 +351,7 @@ async function generateOTP(credential, action = 'display') {
     if (!isConnected || !device) {
         // Try to connect first
         try {
-            showMessage('Connecting to Solo 2...', 'info');
-            await connectToDevice();
+            await connectToDevice(true);
         } catch (error) {
             showMessage('Insert your Solo 2 to generate a code', 'info');
             return;
@@ -321,10 +372,14 @@ async function generateOTP(credential, action = 'display') {
         } else if (error.type === 'PIN_REQUIRED') {
             showPinModal();
         } else {
-            showMessage(error.message || 'Failed to generate OTP', 'error');
-            // Connection might be stale, mark as disconnected
-            isConnected = false;
-            updateConnectionStatus(false, credentials.length, true);
+            const message = error.message || String(error);
+            if (message.toLowerCase().includes('no solokeys device connected')) {
+                await markDisconnected(true);
+                showCachedFallback = credentials.length > 0;
+                updateConnectionStatus(false, credentials.length, showCachedFallback);
+                renderCredentials();
+            }
+            showMessage(message || 'Failed to generate OTP', 'error');
         }
     }
 }
@@ -333,8 +388,7 @@ async function handlePasswordEntry(credential, action = 'display', options = {})
     const { fromTouchPoll = false } = options;
     if (!isConnected || !device) {
         try {
-            showMessage('Connecting to Solo 2...', 'info');
-            await connectToDevice();
+            await connectToDevice(true);
         } catch (error) {
             showMessage('Insert your Solo 2 to load the password', 'info');
             return;
@@ -346,9 +400,14 @@ async function handlePasswordEntry(credential, action = 'display', options = {})
     pendingAction = action;
 
     const cacheKey = getPasswordCacheKey(credential);
+    const cachedEntry = getCachedPasswordEntry(cacheKey)?.entry;
+
+    if (!cachedEntry && credential.touchRequired && !fromTouchPoll) {
+        showTouchOverlay();
+    }
 
     try {
-        let entry = getCachedPasswordEntry(cacheKey)?.entry;
+        let entry = cachedEntry;
         if (!entry) {
             let lastError = null;
             let emptyEntry = null;
@@ -385,10 +444,12 @@ async function handlePasswordEntry(credential, action = 'display', options = {})
 
         const value = entry.password || entry.login || '';
         if (!value) {
+            hideTouchOverlay();
             showMessage('No password data stored for this credential', 'info');
             return;
         }
 
+        hideTouchOverlay();
         if (action === 'copy') {
             await navigator.clipboard.writeText(value);
             markCachedPasswordFieldUsed(cacheKey, entry.password ? 'password' : 'login');
@@ -410,8 +471,17 @@ async function handlePasswordEntry(credential, action = 'display', options = {})
             showTouchOverlay();
             pollForPasswordTouch(credential, action);
         } else if (error.type === 'PIN_REQUIRED') {
+            hideTouchOverlay();
             showPinModal();
         } else {
+            hideTouchOverlay();
+            const message = error.message || String(error);
+            if (message.toLowerCase().includes('no solokeys device connected')) {
+                await markDisconnected(true);
+                showCachedFallback = credentials.length > 0;
+                updateConnectionStatus(false, credentials.length, showCachedFallback);
+                renderCredentials();
+            }
             showMessage(error.message || 'Failed to load password entry', 'error');
         }
     }
@@ -523,7 +593,7 @@ async function pollForPasswordTouch(credential, action) {
 }
 
 function renderCredentials() {
-    document.getElementById('credentialCount').textContent = credentials.length;
+    updateCredentialSectionTitle();
 
     const cached = isCachedWhileOffline();
 
@@ -554,10 +624,7 @@ function renderCredentials() {
         `;
         document.getElementById('addFirstCredBtn')?.addEventListener('click', handleOpenOptions);
     } else {
-        const cachedBanner = cached
-            ? '<div class="message info" style="margin:0 0 8px;">Showing cached credentials — insert your Solo 2 to generate codes</div>'
-            : '';
-        list.innerHTML = cachedBanner + credentials.map(cred =>
+        list.innerHTML = credentials.map(cred =>
             createCredentialItem(
                 cred,
                 matchingCredentials.some(m => (m.rawName || m.name) === (cred.rawName || cred.name)),
@@ -655,6 +722,7 @@ function createCredentialItem(cred, isMatching, isCached = false) {
 }
 
 function displayOTP(otp, credential) {
+    clearMessage();
     currentOTP = otp;
     currentPasswordEntry = null;
     currentPasswordCacheKey = null;
@@ -686,6 +754,7 @@ function displayOTP(otp, credential) {
 }
 
 function displayPassword(entry, credential) {
+    clearMessage();
     currentOTP = entry.password || entry.login || '';
     currentPasswordEntry = entry;
     currentPasswordCacheKey = getPasswordCacheKey(credential);
@@ -848,14 +917,30 @@ function hideTouchOverlay() {
     document.getElementById('touchOverlay').classList.add('hidden');
 }
 
+function clearMessage() {
+    const area = document.getElementById('messageArea');
+    if (messageTimeoutId !== null) {
+        clearTimeout(messageTimeoutId);
+        messageTimeoutId = null;
+    }
+    area.innerHTML = '';
+}
+
 function showMessage(text, type) {
     const area = document.getElementById('messageArea');
     const msg = document.createElement('div');
     msg.className = `message ${type}`;
     msg.textContent = text;
-    area.innerHTML = '';
+    clearMessage();
     area.appendChild(msg);
-    setTimeout(() => { msg.remove(); }, 5000);
+    messageTimeoutId = setTimeout(() => {
+        if (area.contains(msg)) {
+            msg.remove();
+        }
+        if (messageTimeoutId !== null) {
+            messageTimeoutId = null;
+        }
+    }, 5000);
 }
 
 function syncQuickAddForm() {
@@ -923,8 +1008,7 @@ async function handleQuickAddCredential() {
     // Ensure we're connected
     if (!isConnected || !device) {
         try {
-            showMessage('Connecting to Solo 2...', 'info');
-            await connectToDevice();
+            await connectToDevice(true);
         } catch (error) {
             showMessage('Please insert your Solo 2 first', 'error');
             return;
