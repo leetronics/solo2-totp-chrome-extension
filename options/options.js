@@ -111,7 +111,7 @@ async function resetSettings() {
 
 async function checkDeviceStatus() {
     try {
-        await connectToDevice();
+        await connectToDevice(true);
     } catch (error) {
         console.log('Auto-connect failed:', error.message);
     }
@@ -150,7 +150,7 @@ async function handleConnect() {
     }
 
     try {
-        await connectToDevice();
+        await connectToDevice(false);
     } catch (error) {
         console.error('Connection error:', error);
         showMessage('Connection failed: ' + error.message, 'error');
@@ -165,22 +165,19 @@ async function handleConnect() {
     }
 }
 
-async function connectToDevice() {
+async function connectToDevice(silent = false) {
     try {
         device = new NativeTransport();
         await device.connect(5000);
 
-        credentials = [];
-        try {
-            credentials = await device.listCredentials();
-        } catch (e) {
-            console.warn('Could not list credentials:', e);
-        }
+        credentials = await device.listCredentials();
 
         isConnected = true;
         updateConnectionStatus(true, credentials.length);
         renderCredentialList();
-        showMessage('Solo 2 connected!', 'success');
+        if (!silent) {
+            showMessage('Solo 2 connected!', 'success');
+        }
 
         // Sync state to background
         await chrome.runtime.sendMessage({

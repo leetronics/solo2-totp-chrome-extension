@@ -9,8 +9,13 @@ let credentials = [];
 let currentTabHostname = null;
 let matchingCredentials = [];
 let deviceConnected = false;
+let recentlyConnected = false;
 let pinVerified = false;
 let lastConnectionAttempt = 0;
+let lastProbeAt = 0;
+
+const PROBE_COOLDOWN_MS = 1500;
+const RECENT_CONNECTION_WINDOW_MS = 15000;
 
 // Initialize on startup
 chrome.runtime.onStartup.addListener(initialize);
@@ -31,6 +36,14 @@ async function initialize() {
     if (stored.connectionState?.wasConnected) {
         console.log('SoloKeys Secrets: Previous connection detected, will auto-reconnect on next use');
     }
+    if (stored.connectionState) {
+        const { wasConnected, pinVerified: storedPinVerified, lastConnected } = stored.connectionState;
+        recentlyConnected = Boolean(
+            wasConnected && lastConnected && (Date.now() - lastConnected) < RECENT_CONNECTION_WINDOW_MS
+        );
+        deviceConnected = false;
+        pinVerified = Boolean(recentlyConnected && storedPinVerified);
+    }
     
     // Update badge with any cached matches
     updateBadge();
@@ -50,6 +63,7 @@ async function handleMessage(request, sender) {
         case 'updateDeviceState':
             // Popup updates us on device connection status
             deviceConnected = request.connected;
+            recentlyConnected = request.connected;
             pinVerified = request.pinVerified || false;
             if (request.credentials) {
                 credentials = request.credentials;
@@ -64,7 +78,8 @@ async function handleMessage(request, sender) {
             await chrome.storage.local.set({
                 connectionState: { 
                     wasConnected: deviceConnected, 
-                    lastConnected: deviceConnected ? Date.now() : null 
+                    lastConnected: deviceConnected ? Date.now() : null,
+                    pinVerified,
                 }
             });
             updateBadge();
@@ -76,8 +91,12 @@ async function handleMessage(request, sender) {
                 credentials,
                 pinVerified: pinVerified,
                 credentialCount: credentials.length,
-                cached: !deviceConnected && credentials.length > 0
+                cached: !deviceConnected && credentials.length > 0,
+                reconnecting: recentlyConnected && !deviceConnected && credentials.length > 0
             };
+
+        case 'probeDevice':
+            return await probeDevice(request.force === true);
 
         case 'getCredentials':
             return { credentials };
@@ -91,13 +110,15 @@ async function handleMessage(request, sender) {
         case 'setConnectionState':
             // Allow popup to explicitly set connection state
             deviceConnected = request.connected;
+            recentlyConnected = request.connected;
             if (request.pinVerified !== undefined) {
                 pinVerified = request.pinVerified;
             }
             await chrome.storage.local.set({
                 connectionState: { 
                     wasConnected: deviceConnected, 
-                    lastConnected: deviceConnected ? Date.now() : null 
+                    lastConnected: deviceConnected ? Date.now() : null,
+                    pinVerified,
                 }
             });
             return { success: true };
@@ -177,6 +198,93 @@ async function handleGenerateOTP(credentialName) {
             }
         );
     });
+}
+
+async function probeDevice(force = false) {
+    if (!force && (Date.now() - lastProbeAt) < PROBE_COOLDOWN_MS) {
+        return {
+            success: true,
+            connected: deviceConnected,
+            credentials,
+            pinVerified,
+            cached: !deviceConnected && credentials.length > 0,
+        };
+    }
+
+    lastProbeAt = Date.now();
+
+    const { extensionClientId } = await chrome.storage.local.get(['extensionClientId']);
+    if (!extensionClientId) {
+        deviceConnected = false;
+        pinVerified = false;
+        return {
+            success: false,
+            connected: false,
+            credentials,
+            pinVerified: false,
+            cached: credentials.length > 0,
+            error: 'Not paired with SoloKeys GUI',
+        };
+    }
+
+    const response = await new Promise(resolve => {
+        chrome.runtime.sendNativeMessage(
+            'com.solokeys.secrets',
+            {
+                action: 'listCredentials',
+                clientId: extensionClientId,
+                clientName: 'SoloKeys Secrets – Chrome',
+            },
+            (nativeResponse) => {
+                if (chrome.runtime.lastError) {
+                    resolve({ success: false, error: chrome.runtime.lastError.message });
+                } else {
+                    resolve(nativeResponse || { success: false, error: 'No response from native host' });
+                }
+            }
+        );
+    });
+
+    if (response?.success) {
+        deviceConnected = true;
+        recentlyConnected = true;
+        if (Array.isArray(response.credentials)) {
+            credentials = response.credentials;
+        }
+        await chrome.storage.local.set({
+            connectionState: {
+                wasConnected: true,
+                lastConnected: Date.now(),
+                pinVerified,
+            }
+        });
+        return {
+            success: true,
+            connected: true,
+            credentials,
+            pinVerified,
+            cached: false,
+        };
+    }
+
+    deviceConnected = false;
+    recentlyConnected = false;
+    pinVerified = false;
+    await chrome.storage.local.set({
+        connectionState: {
+            wasConnected: false,
+            lastConnected: null,
+            pinVerified: false,
+        }
+    });
+    return {
+        success: false,
+        connected: false,
+        credentials,
+        pinVerified: false,
+        cached: credentials.length > 0,
+        error: response?.error || 'Device not available',
+    };
 }
 
 async function handleGetPasswordEntry(credentialName) {
