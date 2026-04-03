@@ -14,16 +14,16 @@ let pinVerified = false;
 let lastConnectionAttempt = 0;
 let lastProbeAt = 0;
 let nativePort = null;
-let nativePortIdleTimer = null;
 let nativeRequestInFlight = 0;
 let nativeRequestQueue = Promise.resolve();
+let lastNativeSuccessAt = 0;
 
 const HOST_NAME = 'com.solokeys.secrets';
 const CLIENT_NAME = 'SoloKeys Secrets – Chrome';
 const PROBE_COOLDOWN_MS = 1500;
 const RECENT_CONNECTION_WINDOW_MS = 15000;
-const NATIVE_IDLE_MS = 120000;
 const NATIVE_REQUEST_TIMEOUT_MS = 15000;
+const CONNECTED_STATE_FRESH_MS = 10000;
 
 // Initialize on startup
 chrome.runtime.onStartup.addListener(initialize);
@@ -57,27 +57,7 @@ async function initialize() {
     updateBadge();
 }
 
-function scheduleNativePortDisconnect() {
-    if (nativePortIdleTimer) {
-        clearTimeout(nativePortIdleTimer);
-        nativePortIdleTimer = null;
-    }
-
-    if (!nativePort || nativeRequestInFlight > 0) {
-        return;
-    }
-
-    nativePortIdleTimer = setTimeout(() => {
-        disconnectNativePort('idle');
-    }, NATIVE_IDLE_MS);
-}
-
 function disconnectNativePort(reason = 'manual') {
-    if (nativePortIdleTimer) {
-        clearTimeout(nativePortIdleTimer);
-        nativePortIdleTimer = null;
-    }
-
     if (!nativePort) {
         return;
     }
@@ -104,10 +84,6 @@ function ensureNativePort() {
         if (nativePort === port) {
             nativePort = null;
         }
-        if (nativePortIdleTimer) {
-            clearTimeout(nativePortIdleTimer);
-            nativePortIdleTimer = null;
-        }
 
         const message = chrome.runtime.lastError?.message || 'Native host disconnected';
         console.warn(`SoloKeys Secrets: ${message}`);
@@ -119,10 +95,42 @@ function ensureNativePort() {
 }
 
 function sendNativeRequest(payload, options = {}) {
-    const run = () => sendNativeRequestNow(payload, options);
+    const run = () => sendNativeRequestWithRetry(payload, options);
     const request = nativeRequestQueue.then(run, run);
     nativeRequestQueue = request.catch(() => {});
     return request;
+}
+
+function shouldRetryNativeError(error) {
+    const message = String(error?.message || error || '').toLowerCase();
+    return (
+        message.includes('timeout') ||
+        message.includes('disconnected') ||
+        message.includes('native host has exited') ||
+        message.includes('native host exited') ||
+        message.includes('broken pipe') ||
+        message.includes('specified native messaging host not found')
+    );
+}
+
+async function sendNativeRequestWithRetry(payload, options = {}) {
+    const attempts = options.retry ? 2 : 1;
+    let lastError = null;
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+            return await sendNativeRequestNow(payload, options);
+        } catch (error) {
+            lastError = error;
+            disconnectNativePort(attempt === 0 ? 'retry' : 'failed');
+            if (attempt + 1 >= attempts || !shouldRetryNativeError(error)) {
+                break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 150));
+        }
+    }
+
+    throw lastError || new Error('Native request failed');
 }
 
 function sendNativeRequestNow(payload, options = {}) {
@@ -130,10 +138,6 @@ function sendNativeRequestNow(payload, options = {}) {
     const port = ensureNativePort();
 
     nativeRequestInFlight += 1;
-    if (nativePortIdleTimer) {
-        clearTimeout(nativePortIdleTimer);
-        nativePortIdleTimer = null;
-    }
 
     return new Promise((resolve, reject) => {
         let settled = false;
@@ -151,11 +155,11 @@ function sendNativeRequestNow(payload, options = {}) {
             port.onMessage.removeListener(onMessage);
             port.onDisconnect.removeListener(onDisconnect);
             nativeRequestInFlight = Math.max(0, nativeRequestInFlight - 1);
-            scheduleNativePortDisconnect();
             callback(value);
         };
 
         const onMessage = (response) => {
+            lastNativeSuccessAt = Date.now();
             finish(resolve, response);
         };
 
@@ -257,8 +261,9 @@ async function handleMessage(request, sender) {
             return await probeDevice(request.force === true);
 
         case 'nativeRequest':
-            return await sendNativeRequest(request.payload || {}, {
+            return await sendNativeHostAction(request.payload || {}, {
                 timeoutMs: request.timeoutMs,
+                retry: true,
             });
 
         case 'getCredentials':
@@ -362,13 +367,29 @@ async function probeDevice(force = false) {
         };
     }
 
+    if (
+        !force &&
+        deviceConnected &&
+        nativePort &&
+        lastNativeSuccessAt &&
+        (Date.now() - lastNativeSuccessAt) < CONNECTED_STATE_FRESH_MS
+    ) {
+        return {
+            success: true,
+            connected: true,
+            credentials,
+            pinVerified,
+            cached: false,
+        };
+    }
+
     lastProbeAt = Date.now();
 
     let response;
     try {
         response = await sendNativeHostAction(
             { action: 'listCredentials' },
-            { timeoutMs: NATIVE_REQUEST_TIMEOUT_MS },
+            { timeoutMs: NATIVE_REQUEST_TIMEOUT_MS, retry: true },
         );
     } catch (error) {
         response = { success: false, error: error.message || String(error) };

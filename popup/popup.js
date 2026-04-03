@@ -158,10 +158,14 @@ async function loadStateFromBackground() {
         credentials = response.credentials || [];
         showCachedFallback = false;
 
-        // Render cached state optimistically like a live connection.
-        // If the silent probe fails afterwards, we switch to explicit cached UI.
-        isConnected = false;
-        if (credentials.length > 0 || response.cached) {
+        if (response.connected) {
+            device = new NativeTransport();
+            isConnected = true;
+            updateConnectionStatus(true, credentials.length);
+        } else if (credentials.length > 0 || response.cached) {
+            // Render cached state optimistically like a live connection.
+            // If the silent probe fails afterwards, we switch to explicit cached UI.
+            isConnected = false;
             updateConnectionStatus(true, credentials.length, false, false);
         } else {
             updateConnectionStatus(false, credentials.length, false);
@@ -190,6 +194,9 @@ async function silentConnect() {
         isSyncing = true;
         const probe = await chrome.runtime.sendMessage({ action: 'probeDevice' });
         if (probe?.connected) {
+            if (!device) {
+                device = new NativeTransport();
+            }
             credentials = probe.credentials || credentials;
             showCachedFallback = false;
             isConnected = true;
@@ -305,6 +312,17 @@ async function connectToDevice(silent = false) {
     reconnectInFlight = (async () => {
         device = new NativeTransport();
         try {
+            const backgroundState = await chrome.runtime.sendMessage({ action: 'getDeviceState' });
+            if (backgroundState?.connected) {
+                credentials = backgroundState.credentials || credentials;
+                isConnected = true;
+                showCachedFallback = false;
+                updateConnectionStatus(true, credentials.length);
+                renderCredentials();
+                clearMessage();
+                return;
+            }
+
             await device.connect(5000);
             const creds = await device.listCredentials();
 

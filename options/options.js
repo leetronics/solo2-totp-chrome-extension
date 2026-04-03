@@ -131,6 +131,15 @@ async function resetSettings() {
 
 async function checkDeviceStatus() {
     try {
+        const response = await chrome.runtime.sendMessage({ action: 'getDeviceState' });
+        if (response?.connected) {
+            device = new NativeTransport();
+            credentials = response.credentials || [];
+            isConnected = true;
+            updateConnectionStatus(true, credentials.length);
+            renderCredentialList();
+            return;
+        }
         await connectToDevice(true);
     } catch (error) {
         console.log('Auto-connect failed:', error.message);
@@ -188,6 +197,15 @@ async function handleConnect() {
 async function connectToDevice(silent = false) {
     try {
         device = new NativeTransport();
+        const backgroundState = await chrome.runtime.sendMessage({ action: 'getDeviceState' });
+        if (backgroundState?.connected) {
+            credentials = backgroundState.credentials || credentials;
+            isConnected = true;
+            updateConnectionStatus(true, credentials.length);
+            renderCredentialList();
+            return;
+        }
+
         await device.connect(5000);
 
         credentials = await device.listCredentials();
