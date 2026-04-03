@@ -6,6 +6,7 @@ import NativeTransport from '../lib/native-transport.js';
 let isConnected = false;
 let credentials = [];
 let device = null;
+let pinSet = null;
 
 function isExpectedConnectionError(error) {
     const message = String(error?.message || error || '').toLowerCase();
@@ -27,11 +28,101 @@ function logConnectionIssue(context, error) {
     console.error(context, error);
 }
 
+function normalizePinSet(value) {
+    return typeof value === 'boolean' ? value : null;
+}
+
+function inferPinSetFromMessage(message) {
+    const normalized = String(message || '').toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+
+    if (
+        normalized.includes('already') &&
+        normalized.includes('pin')
+    ) {
+        return true;
+    }
+
+    if (
+        (normalized.includes('not set') || normalized.includes('no pin')) &&
+        normalized.includes('pin')
+    ) {
+        return false;
+    }
+
+    return null;
+}
+
+function updatePinManagementUI() {
+    const setSection = document.getElementById('setPinSection');
+    const changeSection = document.getElementById('changePinSection');
+    const setButton = document.getElementById('setPinBtn');
+    const changeButton = document.getElementById('changePinBtn');
+    const statusText = document.getElementById('pinStatusText');
+
+    const connectedText = 'Connect your Solo 2 to manage the Secrets app PIN.';
+
+    setButton.disabled = !isConnected;
+    changeButton.disabled = !isConnected;
+
+    if (pinSet === false) {
+        setSection.hidden = false;
+        changeSection.hidden = true;
+        statusText.textContent = isConnected
+            ? 'No Secrets app PIN is set on this device yet.'
+            : connectedText;
+        return;
+    }
+
+    setSection.hidden = true;
+    changeSection.hidden = false;
+
+    if (pinSet === true) {
+        statusText.textContent = isConnected
+            ? 'A Secrets app PIN is already configured on this device.'
+            : connectedText;
+        return;
+    }
+
+    statusText.textContent = isConnected
+        ? 'PIN status could not be determined from the current device response.'
+        : connectedText;
+}
+
+function updateKnownPinSet(value) {
+    const normalized = normalizePinSet(value);
+    if (normalized !== null) {
+        pinSet = normalized;
+    }
+    updatePinManagementUI();
+}
+
+async function syncPinStateToBackground() {
+    try {
+        await chrome.runtime.sendMessage({
+            action: 'setConnectionState',
+            connected: isConnected,
+            pinSet,
+        });
+    } catch (error) {
+        console.warn('Failed to sync PIN state:', error);
+    }
+}
+
+function clearChangePinForm() {
+    document.getElementById('currentPin').value = '';
+    document.getElementById('changeNewPin').value = '';
+    document.getElementById('changeConfirmPin').value = '';
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     setupTabs();
     syncAddForm();
+    updatePinManagementUI();
     await loadSettings();
     await checkDeviceStatus();
 });
@@ -55,6 +146,14 @@ function setupEventListeners() {
     // PIN management
     document.getElementById('setPinBtn').addEventListener('click', handleSetPIN);
     document.getElementById('changePinBtn').addEventListener('click', handleChangePIN);
+    document.getElementById('newPin').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleSetPIN();
+    });
+    ['currentPin', 'changeNewPin', 'changeConfirmPin'].forEach((id) => {
+        document.getElementById(id).addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleChangePIN();
+        });
+    });
 
     // Settings
     document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
@@ -132,6 +231,7 @@ async function resetSettings() {
 async function checkDeviceStatus() {
     try {
         const response = await chrome.runtime.sendMessage({ action: 'getDeviceState' });
+        updateKnownPinSet(response?.pinSet);
         if (response?.connected) {
             device = new NativeTransport();
             credentials = response.credentials || [];
@@ -165,6 +265,8 @@ function updateConnectionStatus(connected, count) {
         connectBtn.style.display = 'block';
         isConnected = false;
     }
+
+    updatePinManagementUI();
 }
 
 async function handleConnect() {
@@ -198,6 +300,7 @@ async function connectToDevice(silent = false) {
     try {
         device = new NativeTransport();
         const backgroundState = await chrome.runtime.sendMessage({ action: 'getDeviceState' });
+        updateKnownPinSet(backgroundState?.pinSet);
         if (backgroundState?.connected) {
             credentials = backgroundState.credentials || credentials;
             isConnected = true;
@@ -208,7 +311,9 @@ async function connectToDevice(silent = false) {
 
         await device.connect(5000);
 
-        credentials = await device.listCredentials();
+        const credentialState = await device.listCredentialsWithMeta();
+        credentials = credentialState.credentials;
+        updateKnownPinSet(credentialState.pinSet);
 
         isConnected = true;
         updateConnectionStatus(true, credentials.length);
@@ -222,7 +327,8 @@ async function connectToDevice(silent = false) {
             action: 'updateDeviceState',
             connected: true,
             credentials,
-            pinVerified: false
+            pinVerified: false,
+            pinSet: credentialState.pinSet,
         });
     } catch (error) {
         logConnectionIssue('Failed to connect to Solo 2', error);
@@ -230,13 +336,16 @@ async function connectToDevice(silent = false) {
         const connectBtn = document.getElementById('connectBtn');
         connectBtn.textContent = 'Connect to Solo 2';
         isConnected = false;
+        updateConnectionStatus(false, credentials.length);
     }
 }
 
 async function loadCredentials() {
     if (!device) return;
     try {
-        credentials = await device.listCredentials();
+        const credentialState = await device.listCredentialsWithMeta();
+        credentials = credentialState.credentials;
+        updateKnownPinSet(credentialState.pinSet);
         renderCredentialList();
         updateConnectionStatus(isConnected, credentials.length);
     } catch (error) {
@@ -644,10 +753,25 @@ async function handleSetPIN() {
         if (result.success) {
             showMessage('PIN set successfully!', 'success');
             document.getElementById('newPin').value = '';
+            pinSet = true;
+            updatePinManagementUI();
+            await syncPinStateToBackground();
         } else {
+            const inferredPinSet = inferPinSetFromMessage(result.message || result.error);
+            if (inferredPinSet !== null) {
+                pinSet = inferredPinSet;
+                updatePinManagementUI();
+                await syncPinStateToBackground();
+            }
             showMessage(result.message || 'Failed to set PIN', 'error');
         }
     } catch (error) {
+        const inferredPinSet = inferPinSetFromMessage(error.message);
+        if (inferredPinSet !== null) {
+            pinSet = inferredPinSet;
+            updatePinManagementUI();
+            await syncPinStateToBackground();
+        }
         showMessage('Error: ' + error.message, 'error');
     }
 }
@@ -655,14 +779,20 @@ async function handleSetPIN() {
 async function handleChangePIN() {
     const currentPin = document.getElementById('currentPin').value;
     const newPin = document.getElementById('changeNewPin').value;
+    const confirmPin = document.getElementById('changeConfirmPin').value;
 
-    if (!currentPin || !newPin) {
-        showMessage('Please enter both current and new PIN', 'error');
+    if (!currentPin || !newPin || !confirmPin) {
+        showMessage('Please enter the current PIN and confirm the new PIN', 'error');
         return;
     }
 
     if (newPin.length < 4) {
         showMessage('New PIN must be at least 4 characters', 'error');
+        return;
+    }
+
+    if (newPin !== confirmPin) {
+        showMessage('New PIN entries do not match', 'error');
         return;
     }
 
@@ -675,12 +805,26 @@ async function handleChangePIN() {
         const result = await device.changePIN(currentPin, newPin);
         if (result.success) {
             showMessage('PIN changed successfully!', 'success');
-            document.getElementById('currentPin').value = '';
-            document.getElementById('changeNewPin').value = '';
+            clearChangePinForm();
+            pinSet = true;
+            updatePinManagementUI();
+            await syncPinStateToBackground();
         } else {
+            const inferredPinSet = inferPinSetFromMessage(result.message || result.error);
+            if (inferredPinSet !== null) {
+                pinSet = inferredPinSet;
+                updatePinManagementUI();
+                await syncPinStateToBackground();
+            }
             showMessage(result.message || 'Failed to change PIN', 'error');
         }
     } catch (error) {
+        const inferredPinSet = inferPinSetFromMessage(error.message);
+        if (inferredPinSet !== null) {
+            pinSet = inferredPinSet;
+            updatePinManagementUI();
+            await syncPinStateToBackground();
+        }
         showMessage('Error: ' + error.message, 'error');
     }
 }

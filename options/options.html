@@ -495,11 +495,14 @@
             <div class="card">
                 <h2>🔒 PIN Management</h2>
                 
-                <div class="card pin-section" id="setPinSection">
+                <p class="help-text">This PIN only applies to the SoloKeys Secrets app. It does not change your FIDO2 PIN or any PIV PIN.</p>
+                <p class="help-text" id="pinStatusText" style="margin-bottom: 20px;"></p>
+
+                <div class="card pin-section" id="setPinSection" hidden>
                     <h3>Set Initial PIN</h3>
                     <div class="form-group">
                         <label>New PIN</label>
-                        <input type="password" id="newPin" placeholder="Enter PIN (4-8 digits)">
+                        <input type="password" id="newPin" placeholder="Enter PIN (4-8 digits)" autocomplete="new-password">
                     </div>
                     <button class="btn" id="setPinBtn">Set PIN</button>
                 </div>
@@ -508,11 +511,15 @@
                     <h3>Change PIN</h3>
                     <div class="form-group">
                         <label>Current PIN</label>
-                        <input type="password" id="currentPin" placeholder="Current PIN">
+                        <input type="password" id="currentPin" placeholder="Current PIN" autocomplete="current-password">
                     </div>
                     <div class="form-group">
                         <label>New PIN</label>
-                        <input type="password" id="changeNewPin" placeholder="New PIN">
+                        <input type="password" id="changeNewPin" placeholder="New PIN" autocomplete="new-password">
+                    </div>
+                    <div class="form-group">
+                        <label>Confirm New PIN</label>
+                        <input type="password" id="changeConfirmPin" placeholder="Re-enter new PIN" autocomplete="new-password">
                     </div>
                     <button class="btn" id="changePinBtn">Change PIN</button>
                 </div>

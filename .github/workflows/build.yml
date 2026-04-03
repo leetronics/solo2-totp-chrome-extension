@@ -1,94 +1,105 @@
-name: Build and Release Extension
+name: Build Extension
 
 on:
   push:
-    branches: [ main, master ]
+    branches:
+      - master
+      - main
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
-    branches: [ main, master ]
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-extension-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
+    name: Validate
     runs-on: ubuntu-latest
-    name: Validate Extension
-    
+
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-    
-    - name: Install dependencies
-      run: npm ci
-      
-    - name: Validate extension structure
-      run: node build.js --validate
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+
+      - name: Validate extension
+        run: npm run validate
 
   build:
+    name: Build
     runs-on: ubuntu-latest
-    name: Build Extension
     needs: validate
-    
+
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-    
-    - name: Install dependencies
-      run: npm ci
-      
-    - name: Build extension
-      run: node build.js --zip
-    
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: extension-package
-        path: |
-          solokeys-totp-*.zip
-          dist/
-          INSTALL-*.md
-        retention-days: 30
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+
+      - name: Build extension package
+        run: npm run build:zip
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: solokeys-extension-build
+          path: |
+            solokeys-totp-*.zip
+            solokeys-totp-*.tar.gz
+            dist/
+            INSTALL-*.md
+          if-no-files-found: error
+          retention-days: 30
 
   release:
+    name: Release
     runs-on: ubuntu-latest
-    name: Create Release
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
-    
+    permissions:
+      contents: write
+
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-    
-    - name: Install dependencies
-      run: npm ci
-      
-    - name: Build extension
-      run: node build.js --zip
-    
-    - name: Get version from tag
-      id: get_version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-    
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          solokeys-totp-*.zip
-          INSTALL-*.md
-        name: Release ${{ steps.get_version.outputs.VERSION }}
-        draft: false
-        prerelease: false
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+
+      - name: Build release package
+        run: npm run build:zip
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            solokeys-totp-*.zip
+            solokeys-totp-*.tar.gz
+            INSTALL-*.md
+          generate_release_notes: true

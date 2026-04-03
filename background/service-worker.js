@@ -11,6 +11,7 @@ let matchingCredentials = [];
 let deviceConnected = false;
 let recentlyConnected = false;
 let pinVerified = false;
+let pinSet = null;
 let lastConnectionAttempt = 0;
 let lastProbeAt = 0;
 let nativePort = null;
@@ -24,6 +25,37 @@ const PROBE_COOLDOWN_MS = 1500;
 const RECENT_CONNECTION_WINDOW_MS = 15000;
 const NATIVE_REQUEST_TIMEOUT_MS = 15000;
 const CONNECTED_STATE_FRESH_MS = 10000;
+
+function extractPinSetFlag(response) {
+    const candidates = [
+        response?.pinSet,
+        response?.hasPin,
+        response?.pinConfigured,
+        response?.pinInitialized,
+        response?.secretsPinSet,
+        response?.status?.pinSet,
+        response?.device?.pinSet,
+    ];
+
+    for (const candidate of candidates) {
+        if (typeof candidate === 'boolean') {
+            return candidate;
+        }
+    }
+
+    return null;
+}
+
+async function persistConnectionState() {
+    await chrome.storage.local.set({
+        connectionState: {
+            wasConnected: deviceConnected,
+            lastConnected: deviceConnected ? Date.now() : null,
+            pinVerified,
+            pinSet,
+        }
+    });
+}
 
 // Initialize on startup
 chrome.runtime.onStartup.addListener(initialize);
@@ -45,12 +77,18 @@ async function initialize() {
         console.log('SoloKeys Secrets: Previous connection detected, will auto-reconnect on next use');
     }
     if (stored.connectionState) {
-        const { wasConnected, pinVerified: storedPinVerified, lastConnected } = stored.connectionState;
+        const {
+            wasConnected,
+            pinVerified: storedPinVerified,
+            lastConnected,
+            pinSet: storedPinSet,
+        } = stored.connectionState;
         recentlyConnected = Boolean(
             wasConnected && lastConnected && (Date.now() - lastConnected) < RECENT_CONNECTION_WINDOW_MS
         );
         deviceConnected = false;
         pinVerified = Boolean(recentlyConnected && storedPinVerified);
+        pinSet = typeof storedPinSet === 'boolean' ? storedPinSet : null;
     }
     
     // Update badge with any cached matches
@@ -227,6 +265,9 @@ async function handleMessage(request, sender) {
             deviceConnected = request.connected;
             recentlyConnected = request.connected;
             pinVerified = request.pinVerified || false;
+            if (request.pinSet !== undefined) {
+                pinSet = typeof request.pinSet === 'boolean' ? request.pinSet : null;
+            }
             if (request.credentials) {
                 credentials = request.credentials;
                 // Persist fresh credentials for offline display
@@ -236,14 +277,7 @@ async function handleMessage(request, sender) {
                     });
                 }
             }
-            // Save connection state
-            await chrome.storage.local.set({
-                connectionState: { 
-                    wasConnected: deviceConnected, 
-                    lastConnected: deviceConnected ? Date.now() : null,
-                    pinVerified,
-                }
-            });
+            await persistConnectionState();
             updateBadge();
             return { success: true };
 
@@ -252,6 +286,7 @@ async function handleMessage(request, sender) {
                 connected: deviceConnected,
                 credentials,
                 pinVerified: pinVerified,
+                pinSet,
                 credentialCount: credentials.length,
                 cached: !deviceConnected && credentials.length > 0,
                 reconnecting: recentlyConnected && !deviceConnected && credentials.length > 0
@@ -282,13 +317,10 @@ async function handleMessage(request, sender) {
             if (request.pinVerified !== undefined) {
                 pinVerified = request.pinVerified;
             }
-            await chrome.storage.local.set({
-                connectionState: { 
-                    wasConnected: deviceConnected, 
-                    lastConnected: deviceConnected ? Date.now() : null,
-                    pinVerified,
-                }
-            });
+            if (request.pinSet !== undefined) {
+                pinSet = typeof request.pinSet === 'boolean' ? request.pinSet : null;
+            }
+            await persistConnectionState();
             return { success: true };
 
         case 'openPopup':
@@ -363,6 +395,7 @@ async function probeDevice(force = false) {
             connected: deviceConnected,
             credentials,
             pinVerified,
+            pinSet,
             cached: !deviceConnected && credentials.length > 0,
         };
     }
@@ -379,6 +412,7 @@ async function probeDevice(force = false) {
             connected: true,
             credentials,
             pinVerified,
+            pinSet,
             cached: false,
         };
     }
@@ -401,18 +435,17 @@ async function probeDevice(force = false) {
         if (Array.isArray(response.credentials)) {
             credentials = response.credentials;
         }
-        await chrome.storage.local.set({
-            connectionState: {
-                wasConnected: true,
-                lastConnected: Date.now(),
-                pinVerified,
-            }
-        });
+        const reportedPinSet = extractPinSetFlag(response);
+        if (reportedPinSet !== null) {
+            pinSet = reportedPinSet;
+        }
+        await persistConnectionState();
         return {
             success: true,
             connected: true,
             credentials,
             pinVerified,
+            pinSet,
             cached: false,
         };
     }
@@ -420,18 +453,13 @@ async function probeDevice(force = false) {
     deviceConnected = false;
     recentlyConnected = false;
     pinVerified = false;
-    await chrome.storage.local.set({
-        connectionState: {
-            wasConnected: false,
-            lastConnected: null,
-            pinVerified: false,
-        }
-    });
+    await persistConnectionState();
     return {
         success: false,
         connected: false,
         credentials,
         pinVerified: false,
+        pinSet,
         cached: credentials.length > 0,
         error: response?.error || 'Device not available',
     };

@@ -324,7 +324,8 @@ async function connectToDevice(silent = false) {
             }
 
             await device.connect(5000);
-            const creds = await device.listCredentials();
+            const credentialState = await device.listCredentialsWithMeta();
+            const creds = credentialState.credentials;
 
             credentials = creds;
             isConnected = true;
@@ -333,7 +334,8 @@ async function connectToDevice(silent = false) {
                 action: 'updateDeviceState',
                 connected: true,
                 credentials: creds,
-                pinVerified: false
+                pinVerified: false,
+                pinSet: credentialState.pinSet,
             });
 
             updateConnectionStatus(true, creds.length);
@@ -1084,12 +1086,14 @@ async function handleQuickAddCredential() {
 async function loadCredentialsFromDevice() {
     if (!device) return;
     try {
-        credentials = await device.listCredentials();
+        const credentialState = await device.listCredentialsWithMeta();
+        credentials = credentialState.credentials;
         await chrome.runtime.sendMessage({
             action: 'updateDeviceState',
             connected: true,
             credentials,
-            pinVerified: false
+            pinVerified: false,
+            pinSet: credentialState.pinSet,
         });
         renderCredentials();
         updateConnectionStatus(true, credentials.length);
