@@ -103,7 +103,7 @@ function detectOTPFields() {
         }
     });
     
-    console.log('SoloKeys TOTP: Detected', detectedOTPFields.length, 'OTP fields');
+    console.log('SoloKeys Vault: Detected', detectedOTPFields.length, 'OTP fields');
 }
 
 function detectPasswordFields() {
@@ -211,7 +211,7 @@ function enhanceOTPField(input) {
 
     const btn = document.createElement('button');
     btn.className = 'solokeys-autofill-btn';
-    btn.title = hasMatches ? 'Autofill with SoloKeys' : 'No matching SoloKeys credentials';
+    btn.title = hasMatches ? 'Autofill with SoloKeys Vault' : 'No matching SoloKeys Vault credentials';
     btn.innerHTML = `<img src="${SOLOKEYS_ICON_URL}" alt="" style="width:16px;height:16px;display:block;">`;
     btn.style.cssText = `
         position: fixed;
@@ -266,7 +266,7 @@ function enhancePasswordField(input) {
     const hasMatches = matchingCredentials.some(cred => cred.hasPasswordSafe);
     const btn = document.createElement('button');
     btn.className = 'solokeys-password-btn';
-    btn.title = hasMatches ? 'Fill password with SoloKeys' : 'No matching SoloKeys password entries';
+    btn.title = hasMatches ? 'Fill password with SoloKeys Vault' : 'No matching SoloKeys Vault password entries';
     btn.innerHTML = `<img src="${SOLOKEYS_ICON_URL}" alt="" style="width:16px;height:16px;display:block;">`;
     btn.style.cssText = `
         position: fixed;
@@ -542,7 +542,7 @@ async function fillPasswordEntry(passwordInput, credentialName) {
     if (entry.password) {
         fillInputWithOTP(passwordInput, entry.password);
     }
-    showNotification('Filled credentials from SoloKeys', 'success');
+    showNotification('Filled credentials from SoloKeys Vault', 'success');
 }
 
 async function generateAndFillOTP(input, credentialName) {
@@ -661,7 +661,7 @@ function showNotification(message, type = 'info') {
     const color = colors[type] || colors.info;
     notif.style.background = color.bg;
     notif.style.color = color.text;
-    notif.textContent = '🔐 SoloKeys: ' + message;
+    notif.textContent = '🔐 SoloKeys Vault: ' + message;
     notif.style.opacity = '1';
     
     clearTimeout(notif.hideTimeout);
@@ -748,12 +748,12 @@ async function scanImagesForQR() {
 
         const url = await decodeQRFromImage(img);
         if (url && url.startsWith('otpauth://')) {
-            console.log('SoloKeys: Found OTP QR code -', url.substring(0, 60));
+            console.log('SoloKeys Vault: Found OTP QR code -', url.substring(0, 60));
             results.push({ url, imgSrc: img.src });
         }
     }
 
-    console.log('SoloKeys: Scan complete, found', results.length, 'QR codes');
+    console.log('SoloKeys Vault: Scan complete, found', results.length, 'QR codes');
     return results;
 }
 

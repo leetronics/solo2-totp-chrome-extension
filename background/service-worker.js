@@ -1,5 +1,5 @@
 // background/service-worker.js
-// Background service worker for SoloKeys Secrets extension
+// Background service worker for SoloKeys Vault extension
 // Handles device management through popup relay (WebHID not available in service workers)
 
 import { matchesSite } from '../lib/utils.js';
@@ -20,7 +20,7 @@ let nativeRequestQueue = Promise.resolve();
 let lastNativeSuccessAt = 0;
 
 const HOST_NAME = 'com.solokeys.secrets';
-const CLIENT_NAME = 'SoloKeys Secrets – Chrome';
+const CLIENT_NAME = 'SoloKeys Vault – Chrome';
 const PROBE_COOLDOWN_MS = 1500;
 const RECENT_CONNECTION_WINDOW_MS = 15000;
 const NATIVE_REQUEST_TIMEOUT_MS = 15000;
@@ -64,7 +64,7 @@ chrome.runtime.onInstalled.addListener(initialize);
 // No JS icon setting - rely on manifest theme_icons
 
 async function initialize() {
-    console.log('SoloKeys Secrets: Service worker initialized');
+    console.log('SoloKeys Vault: Service worker initialized');
     
     // Load cached credentials so popup can show them when device is disconnected
     const stored = await chrome.storage.local.get(['credentialCache', 'connectionState']);
@@ -74,7 +74,7 @@ async function initialize() {
     
     // Restore connection state if we were previously connected
     if (stored.connectionState?.wasConnected) {
-        console.log('SoloKeys Secrets: Previous connection detected, will auto-reconnect on next use');
+        console.log('SoloKeys Vault: Previous connection detected, will auto-reconnect on next use');
     }
     if (stored.connectionState) {
         const {
@@ -109,7 +109,7 @@ function disconnectNativePort(reason = 'manual') {
         // Port already closed.
     }
 
-    console.log(`SoloKeys Secrets: Native host port closed (${reason})`);
+    console.log(`SoloKeys Vault: Native host port closed (${reason})`);
 }
 
 function ensureNativePort() {
@@ -124,11 +124,11 @@ function ensureNativePort() {
         }
 
         const message = chrome.runtime.lastError?.message || 'Native host disconnected';
-        console.warn(`SoloKeys Secrets: ${message}`);
+        console.warn(`SoloKeys Vault: ${message}`);
     });
 
     nativePort = port;
-    console.log('SoloKeys Secrets: Native host port opened');
+    console.log('SoloKeys Vault: Native host port opened');
     return port;
 }
 

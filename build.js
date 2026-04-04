@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build script for SoloKeys TOTP Chrome Extension
+ * Build script for SoloKeys Vault Chrome Extension
  * 
  * Usage:
  *   node build.js              - Build and create ZIP for Chrome Web Store
@@ -207,7 +207,7 @@ async function createZIP() {
     const manifestPath = path.join(EXTENSION_DIR, 'manifest.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     const version = manifest.version;
-    const zipName = `solokeys-totp-v${version}.zip`;
+    const zipName = `solokeys-vault-v${version}.zip`;
     const zipPath = path.join(EXTENSION_DIR, zipName);
     
     if (archiver) {
@@ -239,7 +239,7 @@ async function createZIP() {
         } catch (e) {
             // If zip command not available, create a simple tar.gz
             try {
-                const tarName = `solokeys-totp-v${version}.tar.gz`;
+                const tarName = `solokeys-vault-v${version}.tar.gz`;
                 const cmd = `cd "${DIST_DIR}" && tar -czf "../${tarName}" .`;
                 execSync(cmd, { stdio: 'inherit' });
                 success(`Created ${tarName} (ZIP not available, created TAR.GZ instead)`);
@@ -261,7 +261,7 @@ function createCRX() {
     const manifestPath = path.join(EXTENSION_DIR, 'manifest.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     const version = manifest.version;
-    const crxName = `solokeys-totp-v${version}.crx`;
+    const crxName = `solokeys-vault-v${version}.crx`;
     const crxPath = path.join(EXTENSION_DIR, crxName);
     
     // Check if Chrome is available
@@ -333,7 +333,7 @@ function generateInstructions(zipPath, crxPath) {
     const manifest = JSON.parse(fs.readFileSync(path.join(EXTENSION_DIR, 'manifest.json'), 'utf8'));
     const version = manifest.version;
     
-    const instructions = `# SoloKeys TOTP Extension v${version}
+    const instructions = `# SoloKeys Vault Extension v${version}
 
 ## Installation Methods
 
@@ -352,7 +352,7 @@ function generateInstructions(zipPath, crxPath) {
 
 ### Method 3: .crx File (Enterprise/Group Policy)
 
-1. Distribute the \`${path.basename(crxPath || 'solokeys-totp-vX.X.X.crx')}\` file to users
+1. Distribute the \`${path.basename(crxPath || 'solokeys-vault-vX.X.X.crx')}\` file to users
 2. Users can drag-and-drop the .crx file onto \`chrome://extensions/\`
 3. Or use Chrome Enterprise policies for automatic installation
 
@@ -388,7 +388,7 @@ dist/
 The extension ID is generated from the public key in key.pem.
 To view the extension ID after installation:
 1. Go to chrome://extensions/
-2. Find "SoloKeys TOTP"
+2. Find "SoloKeys Vault"
 3. The ID is shown below the extension name
 
 ## Permissions Required
@@ -420,7 +420,7 @@ For issues or questions, please refer to the README.md file.
 
 // Main build process
 async function build() {
-    log('\n🔨 Building SoloKeys TOTP Extension...', 'magenta');
+    log('\n🔨 Building SoloKeys Vault Extension...', 'magenta');
     log('=' .repeat(50), 'magenta');
     
     // Validate first

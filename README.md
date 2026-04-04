@@ -1,6 +1,6 @@
-# SoloKeys TOTP Chrome Extension
+# SoloKeys Vault Chrome Extension
 
-A Chrome extension that turns your SoloKeys 2 device into a TOTP (Time-based One-Time Password) provider for 2FA authentication.
+A Chrome extension that turns your SoloKeys 2 device into a password manager with built-in TOTP support for 2FA authentication.
 
 ## Features
 
@@ -52,21 +52,21 @@ make build
 # Build CRX package
 make crx
 
-# Then drag solokeys-totp-*.crx onto chrome://extensions/ page
+# Then drag solokeys-vault-*.crx onto chrome://extensions/ page
 # (Developer mode must be enabled)
 ```
 
 ### Requirements
 
 - Chrome 89+ (for WebHID support)
-- SoloKeys 2 device with firmware supporting the Secrets app
+- SoloKeys 2 device with firmware supporting the Vault app
 - USB connection to your SoloKeys device
 
 ## Usage
 
 ### First Time Setup
 
-1. Click the SoloKeys TOTP icon in your browser toolbar
+1. Click the SoloKeys Vault icon in your browser toolbar
 2. Click "Connect SoloKeys" to authorize the extension to access your device
 3. Select your SoloKeys device from the browser dialog
 
@@ -89,7 +89,7 @@ make crx
 ### Generating OTP Codes
 
 **From Popup:**
-1. Click the SoloKeys TOTP icon
+1. Click the SoloKeys Vault icon
 2. Click on any credential from the list
 3. The OTP code will be displayed with a countdown timer
 4. Click "Copy to Clipboard" or the code will auto-copy (if enabled)
@@ -271,6 +271,6 @@ MIT License - See LICENSE file for details
 
 ## Credits
 
-- Based on the SoloKeys OATH/Secrets app protocol
+- Based on the SoloKeys OATH protocol used by Vault
 - Inspired by the SoloKeys GUI application
 - Uses jsQR library for QR code scanning

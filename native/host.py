@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SoloKeys Secrets Chrome Extension - Native Messaging Host (thin bridge)
+SoloKeys Vault Chrome Extension - Native Messaging Host (thin bridge)
 
 Reads one JSON message from Chrome (stdin framing), forwards it to the
 solokeys-gui Unix socket, and writes the response back to Chrome.

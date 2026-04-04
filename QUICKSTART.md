@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get the SoloKeys TOTP extension running in under 5 minutes!
+Get the SoloKeys Vault extension running in under 5 minutes!
 
 ## Prerequisites
 
@@ -162,8 +162,8 @@ make build
 # 6. Create release
 make package
 # Creates:
-#   - solokeys-totp-vX.X.X.zip (for Chrome Web Store)
-#   - solokeys-totp-vX.X.X.crx (for manual install)
+#   - solokeys-vault-vX.X.X.zip (for Chrome Web Store)
+#   - solokeys-vault-vX.X.X.crx (for manual install)
 ```
 
 ## Need Help?

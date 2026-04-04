@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# install.sh - Automated installation script for SoloKeys TOTP Extension
+# install.sh - Automated installation script for SoloKeys Vault Extension
 #
 # Usage:
 #   ./install.sh           - Install to Chrome (macOS/Linux)
@@ -21,7 +21,7 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="$SCRIPT_DIR/dist"
 
-echo -e "${BLUE}SoloKeys TOTP Extension Installer${NC}"
+echo -e "${BLUE}SoloKeys Vault Extension Installer${NC}"
 echo "=================================="
 echo ""
 
@@ -110,7 +110,7 @@ echo -e "${GREEN}Found Chrome at: $CHROME_PATH${NC}"
 echo ""
 
 # Check if extension is already installed
-EXTENSION_NAME="SoloKeys TOTP"
+EXTENSION_NAME="SoloKeys Vault"
 
 # Function to open Chrome with extensions page
 open_chrome_extensions() {
@@ -138,7 +138,7 @@ Installation Options:
 ====================
 
 Option 1 - Chrome Web Store (Recommended for users):
-  1. Upload solokeys-totp-*.zip to Chrome Web Store
+  1. Upload solokeys-vault-*.zip to Chrome Web Store
   2. Publish and distribute the extension ID
 
 Option 2 - Developer Mode (For testing/development):
@@ -150,7 +150,7 @@ Option 2 - Developer Mode (For testing/development):
 Option 3 - Drag and Drop (Quick install):
   1. Open Chrome: chrome://extensions/
   2. Enable "Developer mode"
-  3. Drag solokeys-totp-*.crx onto the page
+  3. Drag solokeys-vault-*.crx onto the page
 
 Option 4 - Enterprise/Policy:
   Use the generated .crx file with Chrome Enterprise policies

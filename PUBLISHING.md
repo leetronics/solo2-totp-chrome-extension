@@ -1,4 +1,4 @@
-# Publishing Guide for SoloKeys TOTP Extension
+# Publishing Guide for SoloKeys Vault Extension
 
 This guide covers different methods to package and distribute the Chrome extension.
 
@@ -35,7 +35,7 @@ The Chrome Web Store is the recommended distribution method for end users.
 
 3. **Create a new item:**
    - Click "New Item" button
-   - Upload the generated `solokeys-totp-vX.X.X.zip` file
+   - Upload the generated `solokeys-vault-vX.X.X.zip` file
 
 4. **Fill in store listing:**
    - **Description**: Detailed description of the extension
@@ -53,7 +53,7 @@ The Chrome Web Store is the recommended distribution method for end users.
 6. **Privacy practices:**
    - Data usage disclosure
    - Privacy policy URL (if collecting any data)
-   - SoloKeys TOTP does NOT collect user data - all secrets stay on the device
+   - SoloKeys Vault does NOT collect user data - all secrets stay on the device
 
 7. **Submit for review:**
    - Click "Submit for review"
@@ -152,7 +152,7 @@ For organizations managing Chrome deployments.
 2. Navigate to: Devices → Chrome → Apps & extensions
 3. Click "Users & browsers" or "Managed guest sessions"
 4. Click "Add app" → "Add from Chrome Web Store"
-5. Enter the extension ID or search for "SoloKeys TOTP"
+5. Enter the extension ID or search for "SoloKeys Vault"
 6. Select "Force install" or "Allow install"
 7. Save changes
 
@@ -164,7 +164,7 @@ For organizations managing Chrome deployments.
   <?xml version='1.0' encoding='UTF-8'?>
   <gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
     <app appid='YOUR_EXTENSION_ID'>
-      <updatecheck codebase='https://your-server.com/solokeys-totp-v1.0.1.crx' version='1.0.1' />
+      <updatecheck codebase='https://your-server.com/solokeys-vault-v1.0.1.crx' version='1.0.1' />
     </app>
   </gupdate>
   ```
@@ -274,7 +274,7 @@ CHROME_BIN=/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome make c
 - First submissions take longer
 - Ensure all required fields are filled
 - Provide clear description and screenshots
-- SoloKeys TOTP uses WebHID which may require additional review
+- SoloKeys Vault uses WebHID which may require additional review
 
 **"CRX_INSTALL_NOT_ALLOWED"**
 - Extension not in allowlist

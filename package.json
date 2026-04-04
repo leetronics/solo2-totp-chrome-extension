@@ -1,7 +1,7 @@
 {
-  "name": "solokeys-totp-extension",
+  "name": "solokeys-vault-extension",
   "version": "1.0.0",
-  "description": "TOTP provider for SoloKeys 2 security keys - Chrome Extension",
+  "description": "Password manager with TOTP support for SoloKeys 2 security keys",
   "scripts": {
     "build": "node build.js",
     "build:zip": "node build.js --zip",

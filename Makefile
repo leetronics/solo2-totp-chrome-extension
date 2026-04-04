@@ -1,4 +1,4 @@
-# Makefile for SoloKeys TOTP Chrome Extension
+# Makefile for SoloKeys Vault Chrome Extension
 # Provides convenient shortcuts for building and packaging
 
 .PHONY: all build clean install test validate zip crx
@@ -8,7 +8,7 @@ all: build
 
 # Build the extension (creates ZIP and validates)
 build:
-	@echo "🔨 Building SoloKeys TOTP Extension..."
+	@echo "🔨 Building SoloKeys Vault Extension..."
 	@node build.js --zip
 
 # Build only ZIP for Chrome Web Store
@@ -42,7 +42,7 @@ deps:
 
 # Quick install guide
 help:
-	@echo "SoloKeys TOTP Extension - Build Commands"
+	@echo "SoloKeys Vault Extension - Build Commands"
 	@echo "========================================="
 	@echo ""
 	@echo "  make build      - Build extension (creates ZIP)"

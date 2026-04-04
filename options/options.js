@@ -1,5 +1,5 @@
 // options/options.js
-// Options page logic for SoloKeys TOTP extension
+// Options page logic for SoloKeys Vault extension
 
 import NativeTransport from '../lib/native-transport.js';
 
@@ -62,7 +62,7 @@ function updatePinManagementUI() {
     const changeButton = document.getElementById('changePinBtn');
     const statusText = document.getElementById('pinStatusText');
 
-    const connectedText = 'Connect your Solo 2 to manage the Secrets app PIN.';
+    const connectedText = 'Connect your Solo 2 to manage the Vault PIN.';
 
     setButton.disabled = !isConnected;
     changeButton.disabled = !isConnected;
@@ -71,7 +71,7 @@ function updatePinManagementUI() {
         setSection.hidden = false;
         changeSection.hidden = true;
         statusText.textContent = isConnected
-            ? 'No Secrets app PIN is set on this device yet.'
+            ? 'No Vault PIN is set on this device yet.'
             : connectedText;
         return;
     }
@@ -81,7 +81,7 @@ function updatePinManagementUI() {
 
     if (pinSet === true) {
         statusText.textContent = isConnected
-            ? 'A Secrets app PIN is already configured on this device.'
+            ? 'A Vault PIN is already configured on this device.'
             : connectedText;
         return;
     }
@@ -354,6 +354,25 @@ async function loadCredentials() {
     }
 }
 
+function formatCredentialSummary(credential) {
+    const passwordOnly = credential?.passwordOnly || credential?.type === 'PASSWORD';
+    const parts = [];
+
+    if (passwordOnly) {
+        parts.push('Password Safe');
+    } else {
+        if (credential?.type) parts.push(credential.type);
+        if (credential?.algorithm) parts.push(credential.algorithm);
+        if (credential?.digits) parts.push(`${credential.digits} digits`);
+    }
+
+    if (credential?.hasPasswordSafe && !passwordOnly) {
+        parts.push('Password Safe');
+    }
+
+    return parts.join(' • ') || 'Credential';
+}
+
 function renderCredentialList() {
     const list = document.getElementById('credentialList');
 
@@ -372,7 +391,7 @@ function renderCredentialList() {
         <div class="credential-card" data-credential-name="${escapeHtml(cred.rawName || cred.name)}">
             <div class="credential-info">
                 <h3>${escapeHtml(cred.name)}</h3>
-                <p>${cred.type} • ${cred.algorithm} • ${cred.digits} digits</p>
+                <p>${formatCredentialSummary(cred)}</p>
                 <div class="credential-badges">
                     ${cred.touchRequired ? '<span class="badge touch">Touch Required</span>' : ''}
                     ${cred.pinEncrypted ? '<span class="badge pin">PIN Protected</span>' : ''}

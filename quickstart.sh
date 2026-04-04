@@ -6,7 +6,7 @@
 
 set -e
 
-echo "SoloKeys TOTP Extension - Quick Start"
+echo "SoloKeys Vault Extension - Quick Start"
 echo "======================================"
 echo ""
 

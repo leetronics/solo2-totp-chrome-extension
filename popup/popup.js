@@ -1,5 +1,5 @@
 // popup/popup.js
-// Popup UI logic for SoloKeys TOTP extension
+// Popup UI logic for SoloKeys Vault extension
 
 import NativeTransport from '../lib/native-transport.js';
 import { matchesSite } from '../lib/utils.js';
@@ -87,6 +87,24 @@ function buildPasswordLookupNames(credential) {
         names.push(credential.name);
     }
     return names;
+}
+
+function formatCredentialSummary(credential) {
+    const passwordOnly = isPasswordOnlyCredential(credential);
+    const parts = [];
+
+    if (passwordOnly) {
+        parts.push('Password Safe');
+    } else {
+        if (credential?.type) parts.push(credential.type);
+        if (credential?.algorithm) parts.push(credential.algorithm);
+    }
+
+    if (credential?.hasPasswordSafe && !passwordOnly) {
+        parts.push('Password Safe');
+    }
+
+    return parts.join(' • ') || 'Credential';
 }
 
 function getCachedPasswordEntry(cacheKey) {
@@ -732,7 +750,7 @@ function createCredentialItem(cred, isMatching, isCached = false) {
             <div style="min-width:0; flex:1;">
                 ${badges.length ? `<div class="credential-badges">${badges.join('')}</div>` : ''}
                 <div class="credential-name">${nameHtml}</div>
-                <div class="credential-type">${cred.type} • ${cred.algorithm}</div>
+                <div class="credential-type">${formatCredentialSummary(cred)}</div>
             </div>
             <div class="credential-actions">
                 ${actionButtons}

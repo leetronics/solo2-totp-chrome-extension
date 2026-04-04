@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the SoloKeys Secrets native messaging host for Chrome.
+# Install the SoloKeys Vault native messaging host for Chrome.
 #
 # Usage:
 #   ./install.sh <extension-id>
@@ -36,7 +36,7 @@ mkdir -p "$MANIFEST_DIR"
 cat > "$MANIFEST_PATH" <<EOF
 {
     "name": "com.solokeys.secrets",
-    "description": "SoloKeys Secrets native messaging host",
+    "description": "SoloKeys Vault native messaging host",
     "path": "$HOST_PATH",
     "type": "stdio",
     "allowed_origins": [
