@@ -339,6 +339,7 @@ async function showCredentialSelector(input) {
     selector.style.cssText = `
         position: fixed;
         background: white;
+        color: #111;
         border: 1px solid #ddd;
         border-radius: 6px;
         box-shadow: 0 4px 16px rgba(0,0,0,0.2);
@@ -348,6 +349,9 @@ async function showCredentialSelector(input) {
         overflow-y: auto;
         font-family: system-ui, -apple-system, sans-serif;
         font-size: 13px;
+        line-height: 1.4;
+        text-align: left;
+        color-scheme: light;
     `;
 
     // Header
@@ -356,7 +360,7 @@ async function showCredentialSelector(input) {
     header.style.cssText = `
         padding: 6px 12px;
         font-size: 11px;
-        color: #999;
+        color: #666;
         background: #fafafa;
         border-bottom: 1px solid #eee;
         border-radius: 6px 6px 0 0;
@@ -377,6 +381,7 @@ async function showCredentialSelector(input) {
             justify-content: space-between;
             align-items: center;
             gap: 8px;
+            color: #111;
         `;
         const nameEl = document.createElement('span');
         nameEl.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
@@ -385,7 +390,7 @@ async function showCredentialSelector(input) {
             : `<span style="color:#333">${escapeHtml(domain)}</span>`;
         const typeEl = document.createElement('span');
         typeEl.textContent = cred.type;
-        typeEl.style.cssText = 'font-size:11px;color:#bbb;flex-shrink:0;';
+        typeEl.style.cssText = 'font-size:11px;color:#666;flex-shrink:0;';
         option.appendChild(nameEl);
         option.appendChild(typeEl);
 
@@ -447,6 +452,7 @@ async function showPasswordSelector(input) {
     selector.style.cssText = `
         position: fixed;
         background: white;
+        color: #111;
         border: 1px solid #ddd;
         border-radius: 6px;
         box-shadow: 0 4px 16px rgba(0,0,0,0.2);
@@ -456,6 +462,9 @@ async function showPasswordSelector(input) {
         overflow-y: auto;
         font-family: system-ui, -apple-system, sans-serif;
         font-size: 13px;
+        line-height: 1.4;
+        text-align: left;
+        color-scheme: light;
     `;
 
     const header = document.createElement('div');
@@ -463,7 +472,7 @@ async function showPasswordSelector(input) {
     header.style.cssText = `
         padding: 6px 12px;
         font-size: 11px;
-        color: #999;
+        color: #666;
         background: #fafafa;
         border-bottom: 1px solid #eee;
         border-radius: 6px 6px 0 0;
@@ -476,6 +485,7 @@ async function showPasswordSelector(input) {
             padding: 9px 12px;
             cursor: pointer;
             border-bottom: 1px solid #f0f0f0;
+            color: #111;
         `;
         option.textContent = cred.name;
         option.addEventListener('mouseenter', () => { option.style.background = '#eef8f2'; });

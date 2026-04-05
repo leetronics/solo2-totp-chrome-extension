@@ -230,7 +230,7 @@ async function resetSettings() {
 
 async function checkDeviceStatus() {
     try {
-        const response = await chrome.runtime.sendMessage({ action: 'getDeviceState' });
+        const response = await chrome.runtime.sendMessage({ action: 'probeDevice' });
         updateKnownPinSet(response?.pinSet);
         if (response?.connected) {
             device = new NativeTransport();
@@ -299,7 +299,7 @@ async function handleConnect() {
 async function connectToDevice(silent = false) {
     try {
         device = new NativeTransport();
-        const backgroundState = await chrome.runtime.sendMessage({ action: 'getDeviceState' });
+        const backgroundState = await chrome.runtime.sendMessage({ action: 'probeDevice' });
         updateKnownPinSet(backgroundState?.pinSet);
         if (backgroundState?.connected) {
             credentials = backgroundState.credentials || credentials;
@@ -346,6 +346,14 @@ async function loadCredentials() {
         const credentialState = await device.listCredentialsWithMeta();
         credentials = credentialState.credentials;
         updateKnownPinSet(credentialState.pinSet);
+        isConnected = true;
+        await chrome.runtime.sendMessage({
+            action: 'updateDeviceState',
+            connected: true,
+            credentials,
+            pinVerified: false,
+            pinSet: credentialState.pinSet,
+        });
         renderCredentialList();
         updateConnectionStatus(isConnected, credentials.length);
     } catch (error) {

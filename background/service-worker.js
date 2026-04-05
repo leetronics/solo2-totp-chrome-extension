@@ -2,7 +2,7 @@
 // Background service worker for SoloKeys Vault extension
 // Handles device management through popup relay (WebHID not available in service workers)
 
-import { matchesSite } from '../lib/utils.js';
+import { filterVisibleCredentials, matchesSite } from '../lib/utils.js';
 
 // Global state
 let credentials = [];
@@ -25,6 +25,10 @@ const PROBE_COOLDOWN_MS = 1500;
 const RECENT_CONNECTION_WINDOW_MS = 15000;
 const NATIVE_REQUEST_TIMEOUT_MS = 15000;
 const CONNECTED_STATE_FRESH_MS = 10000;
+
+function normalizeCredentials(value) {
+    return filterVisibleCredentials(value);
+}
 
 function extractPinSetFlag(response) {
     const candidates = [
@@ -57,6 +61,58 @@ async function persistConnectionState() {
     });
 }
 
+async function persistCredentialCache() {
+    if (credentials.length > 0) {
+        await chrome.storage.local.set({
+            credentialCache: { credentials, cachedAt: Date.now() }
+        });
+        return;
+    }
+
+    await chrome.storage.local.remove('credentialCache');
+}
+
+async function notifyActiveTabMatchingCredentials() {
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab) {
+            return;
+        }
+
+        await chrome.tabs.sendMessage(tab.id, {
+            action: 'matchingCredentials',
+            credentials: matchingCredentials
+        });
+    } catch (error) {
+        console.log('Could not notify content script:', error);
+    }
+}
+
+async function refreshMatchingCredentials() {
+    if (!currentTabHostname) {
+        matchingCredentials = [];
+    } else {
+        matchingCredentials = credentials.filter(cred =>
+            matchesSite(cred.name, currentTabHostname)
+        );
+    }
+
+    updateBadge();
+    await notifyActiveTabMatchingCredentials();
+}
+
+async function setCredentials(nextCredentials, options = {}) {
+    credentials = normalizeCredentials(nextCredentials);
+
+    if (options.persistCache !== false) {
+        await persistCredentialCache();
+    }
+
+    if (options.refreshMatches !== false) {
+        await refreshMatchingCredentials();
+    }
+}
+
 // Initialize on startup
 chrome.runtime.onStartup.addListener(initialize);
 chrome.runtime.onInstalled.addListener(initialize);
@@ -68,8 +124,11 @@ async function initialize() {
     
     // Load cached credentials so popup can show them when device is disconnected
     const stored = await chrome.storage.local.get(['credentialCache', 'connectionState']);
-    if (stored.credentialCache?.credentials) {
-        credentials = stored.credentialCache.credentials;
+    if (Array.isArray(stored.credentialCache?.credentials)) {
+        credentials = normalizeCredentials(stored.credentialCache.credentials);
+        if (credentials.length !== stored.credentialCache.credentials.length) {
+            await persistCredentialCache();
+        }
     }
     
     // Restore connection state if we were previously connected
@@ -268,14 +327,8 @@ async function handleMessage(request, sender) {
             if (request.pinSet !== undefined) {
                 pinSet = typeof request.pinSet === 'boolean' ? request.pinSet : null;
             }
-            if (request.credentials) {
-                credentials = request.credentials;
-                // Persist fresh credentials for offline display
-                if (credentials.length) {
-                    await chrome.storage.local.set({
-                        credentialCache: { credentials, cachedAt: Date.now() }
-                    });
-                }
+            if (Object.prototype.hasOwnProperty.call(request, 'credentials')) {
+                await setCredentials(request.credentials);
             }
             await persistConnectionState();
             updateBadge();
@@ -347,31 +400,7 @@ async function handleMessage(request, sender) {
 
 async function handleCheckSiteMatch(hostname) {
     currentTabHostname = hostname;
-
-    if (!currentTabHostname) {
-        matchingCredentials = [];
-    } else {
-        matchingCredentials = credentials.filter(cred =>
-            matchesSite(cred.name, currentTabHostname)
-        );
-    }
-
-    updateBadge();
-
-    // Notify content script
-    if (matchingCredentials.length > 0) {
-        try {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            if (tab) {
-                await chrome.tabs.sendMessage(tab.id, {
-                    action: 'matchingCredentials',
-                    credentials: matchingCredentials
-                });
-            }
-        } catch (error) {
-            console.log('Could not notify content script:', error);
-        }
-    }
+    await refreshMatchingCredentials();
 
     return {
         hasMatches: matchingCredentials.length > 0,
@@ -432,9 +461,7 @@ async function probeDevice(force = false) {
     if (response?.success) {
         deviceConnected = true;
         recentlyConnected = true;
-        if (Array.isArray(response.credentials)) {
-            credentials = response.credentials;
-        }
+        await setCredentials(response.credentials);
         const reportedPinSet = extractPinSetFlag(response);
         if (reportedPinSet !== null) {
             pinSet = reportedPinSet;

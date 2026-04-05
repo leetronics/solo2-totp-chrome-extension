@@ -2,7 +2,7 @@
 // Popup UI logic for SoloKeys Vault extension
 
 import NativeTransport from '../lib/native-transport.js';
-import { matchesSite } from '../lib/utils.js';
+import { filterVisibleCredentials, matchesSite } from '../lib/utils.js';
 
 // Global state
 let device = null;
@@ -25,6 +25,17 @@ let passwordVisible = false;
 let reconnectInFlight = null;
 let messageTimeoutId = null;
 let showCachedFallback = false;
+
+function refreshMatchingCredentials() {
+    if (!currentHostname) {
+        matchingCredentials = [];
+        return;
+    }
+
+    matchingCredentials = credentials.filter(cred =>
+        matchesSite(cred.name, currentHostname)
+    );
+}
 
 async function syncConnectionState(connected, pinVerified = false) {
     try {
@@ -188,15 +199,17 @@ async function loadStateFromBackground() {
         } else {
             updateConnectionStatus(false, credentials.length, false);
         }
+        refreshMatchingCredentials();
         renderCredentials();
     } catch (error) {
         console.error('Failed to load state:', error);
         // Still try to show cached credentials
         const stored = await chrome.storage.local.get(['credentialCache']);
         if (stored.credentialCache?.credentials) {
-            credentials = stored.credentialCache.credentials;
+            credentials = filterVisibleCredentials(stored.credentialCache.credentials);
             showCachedFallback = false;
             updateConnectionStatus(true, credentials.length, false, false);
+            refreshMatchingCredentials();
             renderCredentials();
         }
     }
@@ -207,7 +220,7 @@ function isCachedWhileOffline() {
 }
 
 async function silentConnect() {
-    if (isConnected || isSyncing) return;
+    if (isSyncing) return;
     try {
         isSyncing = true;
         const probe = await chrome.runtime.sendMessage({ action: 'probeDevice' });
@@ -219,16 +232,19 @@ async function silentConnect() {
             showCachedFallback = false;
             isConnected = true;
             updateConnectionStatus(true, credentials.length);
+            refreshMatchingCredentials();
             renderCredentials();
             return;
         }
         await markDisconnected(true);
         showCachedFallback = credentials.length > 0;
         updateConnectionStatus(false, credentials.length, showCachedFallback);
+        refreshMatchingCredentials();
         renderCredentials();
     } catch (_) {
         showCachedFallback = credentials.length > 0;
         updateConnectionStatus(false, credentials.length, showCachedFallback);
+        refreshMatchingCredentials();
         renderCredentials();
     } finally {
         isSyncing = false;
@@ -336,6 +352,7 @@ async function connectToDevice(silent = false) {
                 isConnected = true;
                 showCachedFallback = false;
                 updateConnectionStatus(true, credentials.length);
+                refreshMatchingCredentials();
                 renderCredentials();
                 clearMessage();
                 return;
@@ -357,6 +374,7 @@ async function connectToDevice(silent = false) {
             });
 
             updateConnectionStatus(true, creds.length);
+            refreshMatchingCredentials();
             renderCredentials();
             clearMessage();
 
@@ -367,6 +385,7 @@ async function connectToDevice(silent = false) {
             await markDisconnected(true);
             showCachedFallback = credentials.length > 0;
             updateConnectionStatus(false, credentials.length, showCachedFallback);
+            refreshMatchingCredentials();
             renderCredentials();
             throw error;
         }
@@ -1113,6 +1132,7 @@ async function loadCredentialsFromDevice() {
             pinVerified: false,
             pinSet: credentialState.pinSet,
         });
+        refreshMatchingCredentials();
         renderCredentials();
         updateConnectionStatus(true, credentials.length);
     } catch (error) {
