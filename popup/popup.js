@@ -22,6 +22,7 @@ const passwordEntryCache = new Map();
 let currentPasswordEntry = null;
 let currentPasswordCacheKey = null;
 let passwordVisible = false;
+let passwordHideTimer = null;
 let reconnectInFlight = null;
 let messageTimeoutId = null;
 let showCachedFallback = false;
@@ -131,7 +132,7 @@ function getCachedPasswordEntry(cacheKey) {
 function storeCachedPasswordEntry(cacheKey, entry) {
     passwordEntryCache.set(cacheKey, {
         entry,
-        expiresAt: Date.now() + 60_000,
+        expiresAt: Date.now() + 30_000,
         usedLogin: false,
         usedPassword: false,
     });
@@ -784,6 +785,7 @@ function displayOTP(otp, credential) {
     currentPasswordEntry = null;
     currentPasswordCacheKey = null;
     passwordVisible = false;
+    if (passwordHideTimer) { clearTimeout(passwordHideTimer); passwordHideTimer = null; }
     const { domain, username } = parseCredentialName(credential.name);
     const nameEl = document.getElementById('otpCredentialName');
     nameEl.textContent = '';
@@ -816,6 +818,7 @@ function displayPassword(entry, credential) {
     currentPasswordEntry = entry;
     currentPasswordCacheKey = getPasswordCacheKey(credential);
     passwordVisible = false;
+    if (passwordHideTimer) { clearTimeout(passwordHideTimer); passwordHideTimer = null; }
     if (timerInterval) clearInterval(timerInterval);
     const { domain, username } = parseCredentialName(credential.name);
     const nameEl = document.getElementById('otpCredentialName');
@@ -912,6 +915,17 @@ function togglePasswordVisibility() {
         ? currentPasswordEntry.password
         : '***';
     document.getElementById('togglePasswordBtn').textContent = passwordVisible ? 'Hide' : 'Show';
+    if (passwordHideTimer) clearTimeout(passwordHideTimer);
+    if (passwordVisible) {
+        passwordHideTimer = setTimeout(() => {
+            passwordVisible = false;
+            passwordHideTimer = null;
+            document.getElementById('passwordValue').textContent = '***';
+            document.getElementById('togglePasswordBtn').textContent = 'Show';
+        }, 30_000);
+    } else {
+        passwordHideTimer = null;
+    }
 }
 
 function handleOpenOptions(e) {
@@ -1162,34 +1176,33 @@ async function handleScanPageForQR() {
             return;
         }
 
-        // Try to send message to content script, with retry logic
-        let response = null;
-        let retries = 3;
+        // Always inject jsqr.js first so jsQR global is available in content script
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['lib/jsqr.js']
+            });
+        } catch (_) { /* may already be injected, safe to ignore */ }
 
-        while (retries > 0) {
-            try {
-                response = await chrome.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
-                break; // Success, exit retry loop
-            } catch (error) {
-                if (error.message && error.message.includes('Receiving end does not exist')) {
-                    // Content script not loaded yet, try to inject it
-                    try {
-                        await chrome.scripting.executeScript({
-                            target: { tabId: tab.id },
-                            files: ['content/content.js']
-                        });
-                        // Wait a moment for script to initialize
-                        await new Promise(resolve => setTimeout(resolve, 500));
-                        retries--;
-                        if (retries === 0) {
-                            throw new Error('Content script could not be loaded');
-                        }
-                    } catch (injectionError) {
-                        throw new Error('Cannot access this page. Extension may not have permission.');
-                    }
-                } else {
-                    throw error;
+        // Try to send message to content script, injecting it if not yet loaded
+        let response = null;
+        try {
+            response = await chrome.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
+        } catch (error) {
+            if (error.message && error.message.includes('Receiving end does not exist')) {
+                // content.js not yet loaded — inject it, then retry
+                try {
+                    await chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        files: ['content/content.js']
+                    });
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    response = await chrome.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
+                } catch (injectionError) {
+                    throw new Error('Cannot access this page. Extension may not have permission.');
                 }
+            } else {
+                throw error;
             }
         }
 

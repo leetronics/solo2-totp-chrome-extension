@@ -22,6 +22,7 @@ let lastNativeSuccessAt = 0;
 const HOST_NAME = 'com.solokeys.secrets';
 const CLIENT_NAME = 'SoloKeys Vault – Chrome';
 const PROBE_COOLDOWN_MS = 1500;
+const CREDENTIAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const RECENT_CONNECTION_WINDOW_MS = 15000;
 const NATIVE_REQUEST_TIMEOUT_MS = 15000;
 const CONNECTED_STATE_FRESH_MS = 10000;
@@ -124,11 +125,14 @@ async function initialize() {
     
     // Load cached credentials so popup can show them when device is disconnected
     const stored = await chrome.storage.local.get(['credentialCache', 'connectionState']);
-    if (Array.isArray(stored.credentialCache?.credentials)) {
+    const cacheAge = Date.now() - (stored.credentialCache?.cachedAt ?? 0);
+    if (Array.isArray(stored.credentialCache?.credentials) && cacheAge < CREDENTIAL_CACHE_TTL_MS) {
         credentials = normalizeCredentials(stored.credentialCache.credentials);
         if (credentials.length !== stored.credentialCache.credentials.length) {
             await persistCredentialCache();
         }
+    } else if (cacheAge >= CREDENTIAL_CACHE_TTL_MS) {
+        await chrome.storage.local.remove('credentialCache');
     }
     
     // Restore connection state if we were previously connected
