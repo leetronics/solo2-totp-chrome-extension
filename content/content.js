@@ -6,7 +6,8 @@ let detectedPasswordFields = [];
 let matchingCredentials = [];
 let hasRequestedCredentials = false;
 let lastFocusedInput = null;
-const SOLOKEYS_ICON_URL = chrome.runtime.getURL('icons/new-logo-16.png');
+const browserApi = globalThis.browser ?? globalThis.chrome;
+const SOLOKEYS_ICON_URL = browserApi.runtime.getURL('icons/new-logo-16.png');
 
 // Initialize on page load
 if (document.readyState === 'loading') {
@@ -22,7 +23,7 @@ async function initialize() {
     const {
         autoDetectOTP = true,
         autoDetectPasswords = true,
-    } = await chrome.storage.local.get({
+    } = await browserApi.storage.local.get({
         autoDetectOTP: true,
         autoDetectPasswords: true,
     });
@@ -56,13 +57,13 @@ async function initialize() {
     }, true);
 
     // Listen for messages from background/popup
-    chrome.runtime.onMessage.addListener(handleMessage);
+    browserApi.runtime.onMessage.addListener(handleMessage);
 }
 
 function reportSite() {
     const hostname = window.location.hostname;
     if (hostname) {
-        chrome.runtime.sendMessage({ 
+        browserApi.runtime.sendMessage({ 
             action: 'checkSiteMatch', 
             hostname 
         }).catch(() => {});
@@ -74,7 +75,7 @@ async function requestMatchingCredentials() {
     hasRequestedCredentials = true;
     
     try {
-        const response = await chrome.runtime.sendMessage({ 
+        const response = await browserApi.runtime.sendMessage({ 
             action: 'getMatchingCredentials' 
         });
         
@@ -323,14 +324,14 @@ async function showCredentialSelector(input) {
     let label = 'Matching credentials';
     if (creds.length === 0) {
         try {
-            const resp = await chrome.runtime.sendMessage({ action: 'getCredentials' });
+            const resp = await browserApi.runtime.sendMessage({ action: 'getCredentials' });
             creds = resp.credentials || [];
             label = 'All credentials';
         } catch (_) {}
     }
 
     if (creds.length === 0) {
-        chrome.runtime.sendMessage({ action: 'openPopup' });
+        browserApi.runtime.sendMessage({ action: 'openPopup' });
         return;
     }
 
@@ -437,13 +438,13 @@ async function showPasswordSelector(input) {
     let creds = matchingCredentials.filter(cred => cred.hasPasswordSafe);
     if (creds.length === 0) {
         try {
-            const resp = await chrome.runtime.sendMessage({ action: 'getCredentials' });
+            const resp = await browserApi.runtime.sendMessage({ action: 'getCredentials' });
             creds = (resp.credentials || []).filter(cred => cred.hasPasswordSafe);
         } catch (_) {}
     }
 
     if (creds.length === 0) {
-        chrome.runtime.sendMessage({ action: 'openPopup' });
+        browserApi.runtime.sendMessage({ action: 'openPopup' });
         return;
     }
 
@@ -529,7 +530,7 @@ function findAssociatedUsernameField(passwordInput) {
 }
 
 async function fillPasswordEntry(passwordInput, credentialName) {
-    const response = await chrome.runtime.sendMessage({
+    const response = await browserApi.runtime.sendMessage({
         action: 'getPasswordEntry',
         credentialName,
     });
@@ -560,7 +561,7 @@ async function generateAndFillOTP(input, credentialName) {
         // Show loading state
         input.style.opacity = '0.5';
         
-        const response = await chrome.runtime.sendMessage({ 
+        const response = await browserApi.runtime.sendMessage({ 
             action: 'generateOTP', 
             credentialName 
         });
@@ -615,7 +616,7 @@ async function pollForTouchAndFill(input, credentialName) {
         attempts++;
         
         try {
-            const response = await chrome.runtime.sendMessage({ 
+            const response = await browserApi.runtime.sendMessage({ 
                 action: 'retryAfterTouch', 
                 credentialName 
             });

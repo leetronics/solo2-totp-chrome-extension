@@ -4,6 +4,8 @@
 
 import CCIDTransport from '../lib/ccid.js';
 
+const browserApi = globalThis.browser ?? globalThis.chrome;
+
 let device = null;
 let isConnected = false;
 
@@ -29,7 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function setupMessageListener() {
     // Listen for messages from popup
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    browserApi.runtime.onMessage.addListener((request, sender, sendResponse) => {
         handlePopupMessage(request, sender).then(sendResponse).catch(error => {
             console.error('Message handler error:', error);
             sendResponse({ error: error.message || String(error) });
@@ -235,7 +237,7 @@ function showError(titleText, descText, allowRetry) {
 
 async function updateBackgroundState(connected, credentials, pinVerified) {
     try {
-        await chrome.runtime.sendMessage({
+        await browserApi.runtime.sendMessage({
             action: 'updateDeviceState',
             connected: connected,
             credentials: credentials,

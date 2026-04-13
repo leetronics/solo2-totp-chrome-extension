@@ -4,10 +4,14 @@
   "description": "Password manager with TOTP support for SoloKeys 2 security keys",
   "scripts": {
     "build": "node build.js",
-    "build:zip": "node build.js --zip",
-    "build:crx": "node build.js --crx",
+    "build:chrome": "node build.js --chrome",
+    "build:firefox": "node build.js --firefox",
+    "build:zip": "node build.js",
+    "build:crx": "node build.js --chrome --crx",
+    "sign:firefox": "node scripts/sign-firefox.js",
+    "release:firefox": "npm run build:firefox && npm run sign:firefox",
     "validate": "node build.js --validate",
-    "clean": "rm -rf dist/",
+    "clean": "rm -rf dist/ dist-firefox/ web-ext-artifacts/",
     "lint": "npx eslint . --ext .js || true",
     "test": "echo 'No tests specified'"
   },
@@ -16,12 +20,14 @@
     "totp",
     "2fa",
     "security-key",
-    "chrome-extension"
+    "chrome-extension",
+    "firefox-extension"
   ],
   "author": "",
   "license": "MIT OR Apache-2.0",
   "devDependencies": {
     "archiver": "^6.0.1",
-    "chalk": "^4.1.2"
+    "chalk": "^4.1.2",
+    "web-ext": "^8.9.0"
   }
 }

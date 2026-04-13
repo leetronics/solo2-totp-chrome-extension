@@ -4,6 +4,8 @@
 import NativeTransport from '../lib/native-transport.js';
 import { filterVisibleCredentials, matchesSite } from '../lib/utils.js';
 
+const browserApi = globalThis.browser ?? globalThis.chrome;
+
 // Global state
 let device = null;
 let credentials = [];
@@ -40,7 +42,7 @@ function refreshMatchingCredentials() {
 
 async function syncConnectionState(connected, pinVerified = false) {
     try {
-        await chrome.runtime.sendMessage({
+        await browserApi.runtime.sendMessage({
             action: 'setConnectionState',
             connected,
             pinVerified,
@@ -184,7 +186,7 @@ function setupEventListeners() {
 
 async function loadStateFromBackground() {
     try {
-        const response = await chrome.runtime.sendMessage({ action: 'getDeviceState' });
+        const response = await browserApi.runtime.sendMessage({ action: 'getDeviceState' });
         credentials = response.credentials || [];
         showCachedFallback = false;
 
@@ -205,7 +207,7 @@ async function loadStateFromBackground() {
     } catch (error) {
         console.error('Failed to load state:', error);
         // Still try to show cached credentials
-        const stored = await chrome.storage.local.get(['credentialCache']);
+        const stored = await browserApi.storage.local.get(['credentialCache']);
         if (stored.credentialCache?.credentials) {
             credentials = filterVisibleCredentials(stored.credentialCache.credentials);
             showCachedFallback = false;
@@ -224,7 +226,7 @@ async function silentConnect() {
     if (isSyncing) return;
     try {
         isSyncing = true;
-        const probe = await chrome.runtime.sendMessage({ action: 'probeDevice' });
+        const probe = await browserApi.runtime.sendMessage({ action: 'probeDevice' });
         if (probe?.connected) {
             if (!device) {
                 device = new NativeTransport();
@@ -254,10 +256,10 @@ async function silentConnect() {
 
 async function checkCurrentSite() {
     try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const [tab] = await browserApi.tabs.query({ active: true, currentWindow: true });
         if (tab && tab.url) {
             currentHostname = new URL(tab.url).hostname;
-            const response = await chrome.runtime.sendMessage({
+            const response = await browserApi.runtime.sendMessage({
                 action: 'checkSiteMatch',
                 hostname: currentHostname
             });
@@ -347,7 +349,7 @@ async function connectToDevice(silent = false) {
     reconnectInFlight = (async () => {
         device = new NativeTransport();
         try {
-            const backgroundState = await chrome.runtime.sendMessage({ action: 'getDeviceState' });
+            const backgroundState = await browserApi.runtime.sendMessage({ action: 'getDeviceState' });
             if (backgroundState?.connected) {
                 credentials = backgroundState.credentials || credentials;
                 isConnected = true;
@@ -366,7 +368,7 @@ async function connectToDevice(silent = false) {
             credentials = creds;
             isConnected = true;
 
-            await chrome.runtime.sendMessage({
+            await browserApi.runtime.sendMessage({
                 action: 'updateDeviceState',
                 connected: true,
                 credentials: creds,
@@ -551,14 +553,15 @@ function executeOTPAction(otp, credential, action) {
             .then(() => showMessage('Code copied to clipboard', 'success'))
             .catch(() => showMessage('Failed to copy', 'error'));
     } else if (action === 'type') {
-        chrome.tabs.query({ active: true, currentWindow: true }, async ([tab]) => {
+        (async () => {
+            const [tab] = await browserApi.tabs.query({ active: true, currentWindow: true });
             if (!tab) { showMessage('No active tab', 'error'); return; }
 
             let typed = false;
             try {
                 // executeScript transfers DOM focus properly before running, unlike
                 // sendMessage which fires while the popup still owns window focus.
-                const [result] = await chrome.scripting.executeScript({
+                const [result] = await browserApi.scripting.executeScript({
                     target: { tabId: tab.id },
                     // Runs in the tab — data-solokeys-focus marks the last field the
                     // user touched, set by the content script's focusin listener.
@@ -591,7 +594,7 @@ function executeOTPAction(otp, credential, action) {
                     .then(() => showMessage('No focused field — code copied to clipboard', 'info'))
                     .catch(() => showMessage('Failed to copy', 'error'));
             }
-        });
+        })();
     } else {
         displayOTP(otp, credential);
     }
@@ -930,7 +933,7 @@ function togglePasswordVisibility() {
 
 function handleOpenOptions(e) {
     e.preventDefault();
-    chrome.runtime.openOptionsPage();
+    browserApi.runtime.openOptionsPage();
 }
 
 function showPinModal() {
@@ -1139,7 +1142,7 @@ async function loadCredentialsFromDevice() {
     try {
         const credentialState = await device.listCredentialsWithMeta();
         credentials = credentialState.credentials;
-        await chrome.runtime.sendMessage({
+        await browserApi.runtime.sendMessage({
             action: 'updateDeviceState',
             connected: true,
             credentials,
@@ -1164,7 +1167,7 @@ async function handleScanPageForQR() {
     scanBtn.disabled = true;
 
     try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const [tab] = await browserApi.tabs.query({ active: true, currentWindow: true });
         if (!tab) {
             showMessage('No active tab', 'error');
             return;
@@ -1178,7 +1181,7 @@ async function handleScanPageForQR() {
 
         // Always inject jsqr.js first so jsQR global is available in content script
         try {
-            await chrome.scripting.executeScript({
+                        await browserApi.scripting.executeScript({
                 target: { tabId: tab.id },
                 files: ['lib/jsqr.js']
             });
@@ -1187,17 +1190,17 @@ async function handleScanPageForQR() {
         // Try to send message to content script, injecting it if not yet loaded
         let response = null;
         try {
-            response = await chrome.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
+            response = await browserApi.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
         } catch (error) {
             if (error.message && error.message.includes('Receiving end does not exist')) {
                 // content.js not yet loaded — inject it, then retry
                 try {
-                    await chrome.scripting.executeScript({
+                    await browserApi.scripting.executeScript({
                         target: { tabId: tab.id },
                         files: ['content/content.js']
                     });
                     await new Promise(resolve => setTimeout(resolve, 500));
-                    response = await chrome.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
+                    response = await browserApi.tabs.sendMessage(tab.id, { action: 'scanPageForQR' });
                 } catch (injectionError) {
                     throw new Error('Cannot access this page. Extension may not have permission.');
                 }

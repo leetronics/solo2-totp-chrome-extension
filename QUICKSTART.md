@@ -1,11 +1,11 @@
 # Quick Start Guide
 
-Get the SoloKeys Vault extension running in under 5 minutes!
+Get the SoloKeys Vault extension running in under 5 minutes on Chrome/Chromium or Firefox!
 
 ## Prerequisites
 
 - Node.js 14+ (for build scripts)
-- Chrome 89+ (with WebHID support)
+- Chrome/Chromium or Firefox Desktop
 - SoloKeys 2 device
 
 ## Installation
@@ -20,12 +20,11 @@ Get the SoloKeys Vault extension running in under 5 minutes!
 This will:
 1. Check dependencies
 2. Build the extension
-3. Open Chrome extensions page
+3. Build Chrome and Firefox outputs
 
 Then manually:
-1. Enable "Developer mode"
-2. Click "Load unpacked"
-3. Select the `dist/` folder
+1. Chrome/Chromium: open `chrome://extensions/`, enable "Developer mode", then load `dist/`
+2. Firefox: open `about:debugging#/runtime/this-firefox`, then load `dist-firefox/manifest.json`
 
 ### Option 2: Make Commands
 
@@ -52,13 +51,18 @@ node build.js
 #    - Enable Developer mode
 #    - Click "Load unpacked"
 #    - Select dist/ folder
+#
+# 4. Or load in Firefox
+#    - Open about:debugging#/runtime/this-firefox
+#    - Click "Load Temporary Add-on"
+#    - Select dist-firefox/manifest.json
 ```
 
 ## First Use
 
 1. **Connect your SoloKeys:**
    - Plug in your SoloKeys 2 device
-   - Click the SoloKeys icon in Chrome toolbar
+   - Click the SoloKeys Vault icon in your browser toolbar
    - Click "Connect SoloKeys"
    - Select your device from the dialog
 
@@ -81,10 +85,12 @@ node build.js
 
 ```bash
 # Build commands
-make build      # Build extension (creates ZIP)
-make zip        # Create ZIP for Chrome Web Store
-make crx        # Create CRX for manual install
-make package    # Create both ZIP and CRX
+make build      # Build Chrome + Firefox packages
+make zip        # Build Chrome package only
+make firefox    # Build Firefox package only
+make sign-firefox # Sign Firefox package with AMO credentials
+make crx        # Create Chrome CRX for manual install
+make package    # Build both browsers and a Chrome CRX
 
 # Development
 make validate   # Validate extension structure
@@ -93,9 +99,12 @@ make deps       # Install dependencies
 make help       # Show all commands
 
 # Or use Node directly
-node build.js --zip       # Build with ZIP
-node build.js --crx       # Build CRX
+node build.js             # Build Chrome + Firefox packages
+node build.js --chrome    # Build Chrome only
+node build.js --firefox   # Build Firefox only
+node build.js --crx       # Build browsers + Chrome CRX
 node build.js --validate  # Validate only
+node scripts/sign-firefox.js # Sign Firefox package
 ```
 
 ## Troubleshooting
@@ -103,7 +112,7 @@ node build.js --validate  # Validate only
 **"No device found"**
 - Ensure SoloKeys is plugged in
 - Try a different USB port
-- Check Chrome has WebHID permission
+- Check your browser has WebHID permission
 
 **"Build fails"**
 - Make sure Node.js is installed: `node --version`
@@ -111,9 +120,9 @@ node build.js --validate  # Validate only
 - Check all files are present: `make validate`
 
 **"Extension doesn't load"**
-- Verify you're loading the `dist/` folder, not the root
-- Check Chrome is version 89+
-- Look for errors in Chrome DevTools
+- Chrome/Chromium: load `dist/`, not the repo root
+- Firefox: load `dist-firefox/manifest.json`, not the repo root
+- Look for errors in the browser extension console
 
 ## Next Steps
 
@@ -153,17 +162,18 @@ make validate
 # 3. Build
 make build
 
-# 4. Test in Chrome
-#    - Reload extension in chrome://extensions/
-#    - Or click the reload icon on the extension card
+# 4. Test in your target browser
+#    - Chrome/Chromium: reload in chrome://extensions/
+#    - Firefox: reload from about:debugging#/runtime/this-firefox
 
 # 5. Repeat until satisfied
 
 # 6. Create release
 make package
 # Creates:
-#   - solokeys-vault-vX.X.X.zip (for Chrome Web Store)
-#   - solokeys-vault-vX.X.X.crx (for manual install)
+#   - solokeys-vault-chrome-vX.X.X.zip
+#   - solokeys-vault-firefox-vX.X.X.xpi
+#   - solokeys-vault-chrome-vX.X.X.crx
 ```
 
 ## Need Help?
@@ -173,4 +183,4 @@ make package
 - 🔧 Build reference: Run `make help`
 - 🐛 Issues: Check GitHub issues or create a new one
 
-Happy authenticating! 🔐
+Happy authenticating.

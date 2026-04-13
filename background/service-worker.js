@@ -4,6 +4,9 @@
 
 import { filterVisibleCredentials, matchesSite } from '../lib/utils.js';
 
+const browserApi = globalThis.browser ?? globalThis.chrome;
+const actionApi = browserApi.action ?? browserApi.browserAction;
+
 // Global state
 let credentials = [];
 let currentTabHostname = null;
@@ -20,7 +23,7 @@ let nativeRequestQueue = Promise.resolve();
 let lastNativeSuccessAt = 0;
 
 const HOST_NAME = 'com.solokeys.secrets';
-const CLIENT_NAME = 'SoloKeys Vault – Chrome';
+const CLIENT_NAME = 'SoloKeys Vault – Browser';
 const PROBE_COOLDOWN_MS = 1500;
 const CREDENTIAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const RECENT_CONNECTION_WINDOW_MS = 15000;
@@ -52,7 +55,7 @@ function extractPinSetFlag(response) {
 }
 
 async function persistConnectionState() {
-    await chrome.storage.local.set({
+    await browserApi.storage.local.set({
         connectionState: {
             wasConnected: deviceConnected,
             lastConnected: deviceConnected ? Date.now() : null,
@@ -64,23 +67,23 @@ async function persistConnectionState() {
 
 async function persistCredentialCache() {
     if (credentials.length > 0) {
-        await chrome.storage.local.set({
+        await browserApi.storage.local.set({
             credentialCache: { credentials, cachedAt: Date.now() }
         });
         return;
     }
 
-    await chrome.storage.local.remove('credentialCache');
+    await browserApi.storage.local.remove('credentialCache');
 }
 
 async function notifyActiveTabMatchingCredentials() {
     try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const [tab] = await browserApi.tabs.query({ active: true, currentWindow: true });
         if (!tab) {
             return;
         }
 
-        await chrome.tabs.sendMessage(tab.id, {
+        await browserApi.tabs.sendMessage(tab.id, {
             action: 'matchingCredentials',
             credentials: matchingCredentials
         });
@@ -115,8 +118,8 @@ async function setCredentials(nextCredentials, options = {}) {
 }
 
 // Initialize on startup
-chrome.runtime.onStartup.addListener(initialize);
-chrome.runtime.onInstalled.addListener(initialize);
+browserApi.runtime.onStartup.addListener(initialize);
+browserApi.runtime.onInstalled.addListener(initialize);
 
 // No JS icon setting - rely on manifest theme_icons
 
@@ -124,7 +127,7 @@ async function initialize() {
     console.log('SoloKeys Vault: Service worker initialized');
     
     // Load cached credentials so popup can show them when device is disconnected
-    const stored = await chrome.storage.local.get(['credentialCache', 'connectionState']);
+    const stored = await browserApi.storage.local.get(['credentialCache', 'connectionState']);
     const cacheAge = Date.now() - (stored.credentialCache?.cachedAt ?? 0);
     if (Array.isArray(stored.credentialCache?.credentials) && cacheAge < CREDENTIAL_CACHE_TTL_MS) {
         credentials = normalizeCredentials(stored.credentialCache.credentials);
@@ -132,7 +135,7 @@ async function initialize() {
             await persistCredentialCache();
         }
     } else if (cacheAge >= CREDENTIAL_CACHE_TTL_MS) {
-        await chrome.storage.local.remove('credentialCache');
+        await browserApi.storage.local.remove('credentialCache');
     }
     
     // Restore connection state if we were previously connected
@@ -180,13 +183,13 @@ function ensureNativePort() {
         return nativePort;
     }
 
-    const port = chrome.runtime.connectNative(HOST_NAME);
+    const port = browserApi.runtime.connectNative(HOST_NAME);
     port.onDisconnect.addListener(() => {
         if (nativePort === port) {
             nativePort = null;
         }
 
-        const message = chrome.runtime.lastError?.message || 'Native host disconnected';
+        const message = browserApi.runtime.lastError?.message || 'Native host disconnected';
         console.warn(`SoloKeys Vault: ${message}`);
     });
 
@@ -265,7 +268,7 @@ function sendNativeRequestNow(payload, options = {}) {
         };
 
         const onDisconnect = () => {
-            const message = chrome.runtime.lastError?.message || 'Native host disconnected';
+            const message = browserApi.runtime.lastError?.message || 'Native host disconnected';
             if (nativePort === port) {
                 nativePort = null;
             }
@@ -290,13 +293,13 @@ function sendNativeRequestNow(payload, options = {}) {
 }
 
 async function getExtensionClientId() {
-    const stored = await chrome.storage.local.get(['extensionClientId']);
+    const stored = await browserApi.storage.local.get(['extensionClientId']);
     if (stored.extensionClientId) {
         return stored.extensionClientId;
     }
 
     const clientId = crypto.randomUUID();
-    await chrome.storage.local.set({ extensionClientId: clientId });
+    await browserApi.storage.local.set({ extensionClientId: clientId });
     return clientId;
 }
 
@@ -313,7 +316,7 @@ async function sendNativeHostAction(payload, options = {}) {
 }
 
 // Handle messages from popup and content scripts
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+browserApi.runtime.onMessage.addListener((request, sender, sendResponse) => {
     handleMessage(request, sender).then(sendResponse).catch(error => {
         console.error('Message handler error:', error);
         sendResponse({ error: error.message || String(error) });
@@ -383,7 +386,7 @@ async function handleMessage(request, sender) {
         case 'openPopup':
             // Open the extension popup
             try {
-                await chrome.action.openPopup();
+                await actionApi.openPopup();
                 return { success: true };
             } catch (error) {
                 return { success: false, error: error.message };
@@ -506,14 +509,14 @@ async function handleGetPasswordEntry(credentialName) {
 
 function updateBadge() {
     const count = matchingCredentials.length;
-    chrome.action.setBadgeText({ text: count > 0 ? count.toString() : '' });
-    chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+    actionApi.setBadgeText({ text: count > 0 ? count.toString() : '' });
+    actionApi.setBadgeBackgroundColor({ color: '#4CAF50' });
 }
 
 // Listen for tab changes to update matching credentials
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
+browserApi.tabs.onActivated.addListener(async (activeInfo) => {
     try {
-        const tab = await chrome.tabs.get(activeInfo.tabId);
+        const tab = await browserApi.tabs.get(activeInfo.tabId);
         if (tab && tab.url) {
             const hostname = new URL(tab.url).hostname;
             await handleCheckSiteMatch(hostname);
@@ -523,7 +526,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     }
 });
 
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+browserApi.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete' && tab.active && tab.url) {
         try {
             const hostname = new URL(tab.url).hostname;

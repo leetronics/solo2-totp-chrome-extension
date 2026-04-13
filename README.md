@@ -1,6 +1,6 @@
-# SoloKeys Vault Chrome Extension
+# SoloKeys Vault Browser Extension
 
-A Chrome extension that turns your SoloKeys 2 device into a password manager with built-in TOTP support for 2FA authentication.
+A browser extension for Chrome/Chromium and Firefox that turns your SoloKeys 2 device into a password manager with built-in TOTP support for 2FA authentication.
 
 ## Features
 
@@ -15,11 +15,18 @@ A Chrome extension that turns your SoloKeys 2 device into a password manager wit
 
 ## Installation
 
-### From Chrome Web Store (Recommended)
+### Chrome / Chromium
 
 1. Visit the Chrome Web Store (link TBD after publishing)
 2. Click "Add to Chrome"
 3. Follow the installation prompts
+
+### Firefox Desktop
+
+1. Build the Firefox package with `node build.js --firefox` or `make firefox`
+2. For local testing, open `about:debugging#/runtime/this-firefox`
+3. Click "Load Temporary Add-on" and select `dist-firefox/manifest.json`
+4. For release use, sign the generated `.xpi` with `WEB_EXT_API_KEY=... WEB_EXT_API_SECRET=... npm run sign:firefox`
 
 ### From Source (Developer Mode)
 
@@ -42,10 +49,8 @@ make build
    # Or with Node.js
    node build.js
    ```
-3. Open Chrome and navigate to `chrome://extensions/`
-4. Enable "Developer mode" in the top right
-5. Click "Load unpacked" and select the `dist/` folder
-6. The extension icon should appear in your toolbar
+3. Load the Chrome build from `dist/` via `chrome://extensions/`, or load the Firefox build from `dist-firefox/` via `about:debugging#/runtime/this-firefox`
+4. The extension icon should appear in your browser toolbar
 
 **Option C - Using CRX File:**
 ```bash
@@ -58,7 +63,7 @@ make crx
 
 ### Requirements
 
-- Chrome 89+ (for WebHID support)
+- Chrome/Chromium or Firefox Desktop
 - SoloKeys 2 device with firmware supporting the Vault app
 - USB connection to your SoloKeys device
 
@@ -182,7 +187,7 @@ chrome-solokeys-totp/
 #### Prerequisites
 
 - Node.js 14+ (for build scripts)
-- Chrome 89+ (for testing)
+- Chrome/Chromium or Firefox Desktop for testing
 
 #### Quick Build
 
@@ -190,55 +195,81 @@ chrome-solokeys-totp/
 # Install dependencies (optional, for enhanced ZIP creation)
 npm install
 
-# Build extension (creates ZIP package)
+# Build both browser packages
 make build
 # or
 node build.js
 
-# Create ZIP for Chrome Web Store
+# Create the Chrome package only
 make zip
 # or
-node build.js --zip
+node build.js --chrome
+
+# Create the Firefox package only
+make firefox
+# or
+node build.js --firefox
+
+# Sign the Firefox release package
+WEB_EXT_API_KEY=... WEB_EXT_API_SECRET=... npm run sign:firefox
 
 # Create CRX for manual installation
 make crx
 # or
-node build.js --crx
+node build.js --chrome --crx
 ```
 
 #### Build Options
 
-- `node build.js --zip` - Create ZIP for Chrome Web Store (default)
-- `node build.js --crx` - Create CRX for manual installation
+- `node build.js` - Build Chrome and Firefox packages
+- `node build.js --chrome` - Build Chrome outputs only
+- `node build.js --firefox` - Build Firefox outputs only
+- `node build.js --crx` - Build both browsers and add a Chrome CRX
 - `node build.js --validate` - Validate extension without building
 - `node build.js --clean` - Clean build artifacts
-- `make package` - Create both ZIP and CRX
+- `make package` - Build both browsers and a Chrome CRX
 
 #### Installation Methods
 
 **Method 1: Chrome Web Store (Recommended for distribution)**
 1. Build the extension: `make build`
-2. Upload the generated `.zip` file to [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole/)
+2. Upload `solokeys-vault-chrome-v<version>.zip` to [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole/)
 3. Follow the publishing process
 4. Share the extension ID with users
 
-**Method 2: Developer Mode (For testing)**
-1. Build: `make build`
-2. Open Chrome → `chrome://extensions/`
-3. Enable "Developer mode"
-4. Click "Load unpacked"
-5. Select the `dist/` folder
+**Method 2: Firefox Package**
+1. Build the extension: `make firefox`
+2. Load `dist-firefox/manifest.json` via `about:debugging#/runtime/this-firefox` for local testing
+3. Sign `solokeys-vault-firefox-v<version>.xpi` via `npm run sign:firefox` for release distribution
 
-**Method 3: Automated Installation**
+### Firefox Signing
+
+Firefox release builds for normal Firefox channels must be signed. The repo includes a signing helper based on Mozilla's `web-ext sign`.
+
+```bash
+npm install
+npm run build:firefox
+WEB_EXT_API_KEY=... WEB_EXT_API_SECRET=... npm run sign:firefox
+```
+
+This writes a normalized signed artifact as `solokeys-vault-firefox-v<version>-signed.xpi`.
+
+**Method 3: Developer Mode (For testing)**
+1. Build: `make build`
+2. Chrome/Chromium: open `chrome://extensions/`, enable "Developer mode", then load `dist/`
+3. Firefox: open `about:debugging#/runtime/this-firefox`, then load `dist-firefox/manifest.json`
+
+**Method 4: Automated Installation Helper**
 ```bash
 # Run the install script
 ./install.sh
 
-# Or with specific Chrome path
-CHROME_BIN=/path/to/chrome ./install.sh
+# Or limit output to one browser
+./install.sh --chrome
+./install.sh --firefox
 ```
 
-**Method 4: Manual CRX Installation**
+**Method 5: Manual CRX Installation**
 1. Build: `make crx`
 2. Open Chrome → `chrome://extensions/`
 3. Enable "Developer mode"
@@ -253,7 +284,7 @@ make validate
 # 2. Build for testing
 make build
 
-# 3. Load dist/ in Chrome developer mode
+# 3. Load dist/ in Chrome or dist-firefox/manifest.json in Firefox
 
 # 4. Make changes and rebuild
 make build

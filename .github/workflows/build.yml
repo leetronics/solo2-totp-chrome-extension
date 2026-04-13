@@ -65,9 +65,11 @@ jobs:
         with:
           name: solokeys-extension-build
           path: |
-            solokeys-totp-*.zip
-            solokeys-totp-*.tar.gz
+            solokeys-vault-chrome-*.zip
+            solokeys-vault-firefox-*.xpi
+            solokeys-vault-chrome-*.crx
             dist/
+            dist-firefox/
             INSTALL-*.md
           if-no-files-found: error
           retention-days: 30
@@ -95,11 +97,20 @@ jobs:
       - name: Build release package
         run: npm run build:zip
 
+      - name: Sign Firefox package
+        if: ${{ secrets.FIREFOX_AMO_API_KEY != '' && secrets.FIREFOX_AMO_API_SECRET != '' }}
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.FIREFOX_AMO_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.FIREFOX_AMO_API_SECRET }}
+        run: npm run sign:firefox
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            solokeys-totp-*.zip
-            solokeys-totp-*.tar.gz
+            solokeys-vault-chrome-*.zip
+            solokeys-vault-firefox-*.xpi
+            solokeys-vault-firefox-*-signed.xpi
+            solokeys-vault-chrome-*.crx
             INSTALL-*.md
           generate_release_notes: true

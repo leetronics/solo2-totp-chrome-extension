@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SoloKeys Vault Chrome Extension - Native Messaging Host (thin bridge)
+SoloKeys Vault Browser Extension - Native Messaging Host (thin bridge)
 
-Reads one JSON message from Chrome (stdin framing), forwards it to the
-solokeys-gui Unix socket, and writes the response back to Chrome.
+Reads one JSON message from the browser (stdin framing), forwards it to the
+solokeys-gui local socket, and writes the response back to the browser.
 
 solokeys-gui must be running for browser-mediated secrets actions to work.
 """

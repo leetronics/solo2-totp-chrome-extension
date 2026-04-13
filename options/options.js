@@ -3,6 +3,8 @@
 
 import NativeTransport from '../lib/native-transport.js';
 
+const browserApi = globalThis.browser ?? globalThis.chrome;
+
 let isConnected = false;
 let credentials = [];
 let device = null;
@@ -101,7 +103,7 @@ function updateKnownPinSet(value) {
 
 async function syncPinStateToBackground() {
     try {
-        await chrome.runtime.sendMessage({
+        await browserApi.runtime.sendMessage({
             action: 'setConnectionState',
             connected: isConnected,
             pinSet,
@@ -187,7 +189,7 @@ function switchTab(tabId) {
 }
 
 async function loadSettings() {
-    const settings = await chrome.storage.local.get({
+    const settings = await browserApi.storage.local.get({
         autoDetectOTP: true,
         autoDetectPasswords: true,
         showNotifications: true
@@ -205,13 +207,13 @@ async function saveSettings() {
         showNotifications: document.getElementById('showNotifications').checked
     };
 
-    await chrome.storage.local.set(settings);
+    await browserApi.storage.local.set(settings);
 
     // Notify all content scripts of the new setting
-    const tabs = await chrome.tabs.query({});
+    const tabs = await browserApi.tabs.query({});
     for (const tab of tabs) {
         if (tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
-            chrome.tabs.sendMessage(tab.id, { action: 'settingsUpdated', settings }).catch(() => {});
+            browserApi.tabs.sendMessage(tab.id, { action: 'settingsUpdated', settings }).catch(() => {});
         }
     }
 
@@ -219,7 +221,7 @@ async function saveSettings() {
 }
 
 async function resetSettings() {
-    await chrome.storage.local.set({
+    await browserApi.storage.local.set({
         autoDetectOTP: true,
         autoDetectPasswords: true,
         showNotifications: true
@@ -230,7 +232,7 @@ async function resetSettings() {
 
 async function checkDeviceStatus() {
     try {
-        const response = await chrome.runtime.sendMessage({ action: 'probeDevice' });
+        const response = await browserApi.runtime.sendMessage({ action: 'probeDevice' });
         updateKnownPinSet(response?.pinSet);
         if (response?.connected) {
             device = new NativeTransport();
@@ -299,7 +301,7 @@ async function handleConnect() {
 async function connectToDevice(silent = false) {
     try {
         device = new NativeTransport();
-        const backgroundState = await chrome.runtime.sendMessage({ action: 'probeDevice' });
+        const backgroundState = await browserApi.runtime.sendMessage({ action: 'probeDevice' });
         updateKnownPinSet(backgroundState?.pinSet);
         if (backgroundState?.connected) {
             credentials = backgroundState.credentials || credentials;
@@ -323,7 +325,7 @@ async function connectToDevice(silent = false) {
         }
 
         // Sync state to background
-        await chrome.runtime.sendMessage({
+        await browserApi.runtime.sendMessage({
             action: 'updateDeviceState',
             connected: true,
             credentials,
@@ -347,7 +349,7 @@ async function loadCredentials() {
         credentials = credentialState.credentials;
         updateKnownPinSet(credentialState.pinSet);
         isConnected = true;
-        await chrome.runtime.sendMessage({
+        await browserApi.runtime.sendMessage({
             action: 'updateDeviceState',
             connected: true,
             credentials,

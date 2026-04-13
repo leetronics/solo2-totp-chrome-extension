@@ -1,37 +1,52 @@
 #!/usr/bin/env node
 /**
- * Build script for SoloKeys Vault Chrome Extension
- * 
+ * Build script for SoloKeys Vault browser extensions.
+ *
  * Usage:
- *   node build.js              - Build and create ZIP for Chrome Web Store
- *   node build.js --zip        - Same as above
- *   node build.js --crx        - Build and create .crx for manual installation
- *   node build.js --validate   - Only validate extension structure
- *   node build.js --clean      - Clean dist directory
+ *   node build.js              - Build Chrome + Firefox packages
+ *   node build.js --chrome     - Build Chrome outputs only
+ *   node build.js --firefox    - Build Firefox outputs only
+ *   node build.js --crx        - Also create a Chrome .crx package
+ *   node build.js --validate   - Only validate sources/manifests
+ *   node build.js --clean      - Clean generated build directories
  */
 
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-// Check if archiver is available
 let archiver;
 try {
     archiver = require('archiver');
-} catch (e) {
-    // archiver not installed, we'll use native Node.js methods
+} catch (error) {
+    archiver = null;
 }
 
+const FIREFOX_EXTENSION_ID = 'solokeys-vault@solokeys.dev';
 const args = process.argv.slice(2);
-const shouldCreateCRX = args.includes('--crx');
-const shouldCreateZIP = args.includes('--zip') || (!shouldCreateCRX && !args.includes('--validate') && !args.includes('--clean'));
 const shouldValidateOnly = args.includes('--validate');
 const shouldClean = args.includes('--clean');
+const shouldCreateCRX = args.includes('--crx');
+const buildChrome = !args.includes('--firefox') || args.includes('--chrome');
+const buildFirefox = !args.includes('--chrome') || args.includes('--firefox');
 
 const EXTENSION_DIR = __dirname;
-const DIST_DIR = path.join(EXTENSION_DIR, 'dist');
+const CHROME_DIST_DIR = path.join(EXTENSION_DIR, 'dist');
+const FIREFOX_DIST_DIR = path.join(EXTENSION_DIR, 'dist-firefox');
+const SHARED_FILES = [
+    'README.md',
+    'test.html',
+];
+const SHARED_DIRS = [
+    'background',
+    'popup',
+    'content',
+    'options',
+    'connection',
+    'lib',
+    'icons',
+];
 
-// Colors for console output
 const colors = {
     reset: '\x1b[0m',
     red: '\x1b[31m',
@@ -39,7 +54,7 @@ const colors = {
     yellow: '\x1b[33m',
     blue: '\x1b[34m',
     magenta: '\x1b[35m',
-    cyan: '\x1b[36m'
+    cyan: '\x1b[36m',
 };
 
 function log(message, color = 'reset') {
@@ -58,437 +73,399 @@ function warn(message) {
     console.log(`${colors.yellow}⚠ ${message}${colors.reset}`);
 }
 
-// Validate extension structure
+function readJSON(filePath) {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function readBaseManifest() {
+    return readJSON(path.join(EXTENSION_DIR, 'manifest.json'));
+}
+
+function deepClone(value) {
+    return JSON.parse(JSON.stringify(value));
+}
+
+function createFirefoxManifest(baseManifest) {
+    const manifest = deepClone(baseManifest);
+    delete manifest.key;
+    manifest.background = {
+        scripts: [baseManifest.background.service_worker],
+        type: baseManifest.background.type || 'module',
+    };
+    manifest.browser_specific_settings = {
+        gecko: {
+            id: FIREFOX_EXTENSION_ID,
+        },
+    };
+    return manifest;
+}
+
+function validateManifest(manifest, label) {
+    const requiredFields = ['manifest_version', 'name', 'version', 'permissions'];
+    let valid = true;
+
+    for (const field of requiredFields) {
+        if (manifest[field]) {
+            success(`${label} field: ${field}`);
+        } else {
+            error(`Missing ${label} field: ${field}`);
+            valid = false;
+        }
+    }
+
+    if (manifest.manifest_version !== 3) {
+        warn(`${label} manifest version is ${manifest.manifest_version}, expected 3`);
+    }
+
+    return valid;
+}
+
 function validateExtension() {
     log('\n🔍 Validating extension structure...', 'cyan');
-    
+
     const requiredFiles = [
         'manifest.json',
         'background/service-worker.js',
         'popup/popup.html',
         'popup/popup.js',
         'content/content.js',
-        'lib/ctaphid.js',
+        'options/options.html',
+        'options/options.js',
         'lib/native-transport.js',
         'lib/utils.js',
-        'icons/icon.svg',
         'icons/new-logo-16.png',
         'icons/new-logo-48.png',
-        'icons/new-logo-128.png'
+        'icons/new-logo-128.png',
     ];
-    
+
     let allValid = true;
-    
-    for (const file of requiredFiles) {
-        const filePath = path.join(EXTENSION_DIR, file);
+
+    for (const relativePath of requiredFiles) {
+        const filePath = path.join(EXTENSION_DIR, relativePath);
         if (fs.existsSync(filePath)) {
-            success(`Found: ${file}`);
+            success(`Found: ${relativePath}`);
         } else {
-            error(`Missing: ${file}`);
+            error(`Missing: ${relativePath}`);
             allValid = false;
         }
     }
-    
-    // Validate manifest
-    log('\n📋 Validating manifest.json...', 'cyan');
+
+    log('\n📋 Validating manifests...', 'cyan');
     try {
-        const manifestPath = path.join(EXTENSION_DIR, 'manifest.json');
-        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        
-        // Check required fields
-        const requiredFields = ['manifest_version', 'name', 'version', 'permissions'];
-        for (const field of requiredFields) {
-            if (manifest[field]) {
-                success(`Manifest field: ${field}`);
-            } else {
-                error(`Missing manifest field: ${field}`);
-                allValid = false;
-            }
-        }
-        
-        // Check manifest version
-        if (manifest.manifest_version !== 3) {
-            warn(`Manifest version is ${manifest.manifest_version}, expected 3`);
-        }
-        
-        // Note: WebHID doesn't require a manifest permission in MV3
-        // It's accessed via navigator.hid API with user gesture
-        
+        const chromeManifest = readBaseManifest();
+        const firefoxManifest = createFirefoxManifest(chromeManifest);
+        allValid = validateManifest(chromeManifest, 'Chrome') && allValid;
+        allValid = validateManifest(firefoxManifest, 'Firefox') && allValid;
         success('Manifest validation complete');
-    } catch (e) {
-        error(`Failed to parse manifest.json: ${e.message}`);
+    } catch (err) {
+        error(`Failed to validate manifests: ${err.message}`);
         allValid = false;
     }
-    
+
     if (allValid) {
         success('\n✓ Extension structure is valid');
     } else {
         error('\n✗ Extension structure has errors');
         process.exit(1);
     }
-    
-    return allValid;
 }
 
-// Clean dist directory
-function cleanDist() {
-    log('\n🧹 Cleaning dist directory...', 'cyan');
-    
-    if (fs.existsSync(DIST_DIR)) {
-        fs.rmSync(DIST_DIR, { recursive: true, force: true });
-        success('Removed existing dist directory');
+function removeIfExists(targetPath) {
+    if (fs.existsSync(targetPath)) {
+        fs.rmSync(targetPath, { recursive: true, force: true });
     }
-    
-    fs.mkdirSync(DIST_DIR, { recursive: true });
-    success('Created dist directory');
 }
 
-// Copy extension files to dist
-function copyExtensionFiles() {
-    log('\n📦 Copying extension files...', 'cyan');
-    
-    const filesToCopy = [
-        'manifest.json',
-        'README.md',
-        'test.html'
-    ];
-    
-    const dirsToCopy = [
-        'background',
-        'popup',
-        'content',
-        'options',
-        'connection',
-        'lib',
-        'icons'
-    ];
-    
-    // Copy individual files
-    for (const file of filesToCopy) {
-        const src = path.join(EXTENSION_DIR, file);
-        const dest = path.join(DIST_DIR, file);
-        if (fs.existsSync(src)) {
-            fs.copyFileSync(src, dest);
-            success(`Copied: ${file}`);
+function cleanBuildDirs() {
+    log('\n🧹 Cleaning build directories...', 'cyan');
+    removeIfExists(CHROME_DIST_DIR);
+    removeIfExists(FIREFOX_DIST_DIR);
+    success('Removed dist/ and dist-firefox/ if present');
+}
+
+function copyRecursive(src, dest) {
+    if (!fs.existsSync(src)) {
+        return;
+    }
+
+    const stat = fs.statSync(src);
+    if (stat.isDirectory()) {
+        fs.mkdirSync(dest, { recursive: true });
+        for (const entry of fs.readdirSync(src)) {
+            copyRecursive(path.join(src, entry), path.join(dest, entry));
         }
+        return;
     }
-    
-    // Copy directories recursively
-    function copyRecursive(src, dest) {
-        if (!fs.existsSync(src)) return;
-        
-        const stat = fs.statSync(src);
-        if (stat.isDirectory()) {
-            if (!fs.existsSync(dest)) {
-                fs.mkdirSync(dest, { recursive: true });
-            }
-            
-            const entries = fs.readdirSync(src);
-            for (const entry of entries) {
-                copyRecursive(path.join(src, entry), path.join(dest, entry));
-            }
-        } else {
-            fs.copyFileSync(src, dest);
-        }
-    }
-    
-    for (const dir of dirsToCopy) {
-        const src = path.join(EXTENSION_DIR, dir);
-        const dest = path.join(DIST_DIR, dir);
-        copyRecursive(src, dest);
-        success(`Copied: ${dir}/`);
-    }
+
+    fs.copyFileSync(src, dest);
 }
 
-// Create ZIP file for Chrome Web Store
-async function createZIP() {
-    log('\n📦 Creating ZIP package...', 'cyan');
-    
-    const manifestPath = path.join(EXTENSION_DIR, 'manifest.json');
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    const version = manifest.version;
-    const zipName = `solokeys-vault-v${version}.zip`;
-    const zipPath = path.join(EXTENSION_DIR, zipName);
-    
+function prepareDistDir(distDir, manifest) {
+    removeIfExists(distDir);
+    fs.mkdirSync(distDir, { recursive: true });
+
+    for (const file of SHARED_FILES) {
+        copyRecursive(path.join(EXTENSION_DIR, file), path.join(distDir, file));
+    }
+
+    for (const dir of SHARED_DIRS) {
+        copyRecursive(path.join(EXTENSION_DIR, dir), path.join(distDir, dir));
+    }
+
+    fs.writeFileSync(
+        path.join(distDir, 'manifest.json'),
+        `${JSON.stringify(manifest, null, 2)}\n`,
+        'utf8',
+    );
+}
+
+function getVersion(manifest) {
+    return manifest.version;
+}
+
+async function createZipArchive(sourceDir, outputPath) {
     if (archiver) {
-        // Use archiver library
-        const output = fs.createWriteStream(zipPath);
+        const output = fs.createWriteStream(outputPath);
         const archive = archiver('zip', { zlib: { level: 9 } });
-        
+
         await new Promise((resolve, reject) => {
-            output.on('close', () => {
-                const size = (archive.pointer() / 1024).toFixed(2);
-                success(`Created ${zipName} (${size} KB)`);
-                resolve();
-            });
-            
-            archive.on('error', (err) => {
-                reject(err);
-            });
-            
+            output.on('close', resolve);
+            archive.on('error', reject);
             archive.pipe(output);
-            archive.directory(DIST_DIR, false);
+            archive.directory(sourceDir, false);
             archive.finalize();
         });
-    } else {
-        // Fallback: use native Node.js and system zip command
-        try {
-            const cmd = `cd "${DIST_DIR}" && zip -r "../${zipName}" . -x "*.DS_Store" -x "*.git*"`;
-            execSync(cmd, { stdio: 'inherit' });
-            success(`Created ${zipName}`);
-        } catch (e) {
-            // If zip command not available, create a simple tar.gz
-            try {
-                const tarName = `solokeys-vault-v${version}.tar.gz`;
-                const cmd = `cd "${DIST_DIR}" && tar -czf "../${tarName}" .`;
-                execSync(cmd, { stdio: 'inherit' });
-                success(`Created ${tarName} (ZIP not available, created TAR.GZ instead)`);
-            } catch (e2) {
-                error('Failed to create archive. Please install zip or tar.');
-                throw e2;
-            }
-        }
+        return;
     }
-    
-    return zipPath;
+
+    const archiveName = path.basename(outputPath);
+    const parentDir = path.dirname(sourceDir);
+    const sourceName = path.basename(sourceDir);
+    execSync(
+        `cd "${parentDir}" && zip -r "${archiveName}" "${sourceName}" -x "*.DS_Store" -x "*.git*"`,
+        { stdio: 'inherit' },
+    );
+    fs.renameSync(path.join(parentDir, archiveName), outputPath);
 }
 
-// Create .crx file for manual installation
-function createCRX() {
-    log('\n🔐 Creating .crx package...', 'cyan');
+async function createChromeZip(chromeManifest) {
+    const version = getVersion(chromeManifest);
+    const archivePath = path.join(EXTENSION_DIR, `solokeys-vault-chrome-v${version}.zip`);
+    log('\n📦 Creating Chrome ZIP package...', 'cyan');
+    await createZipArchive(CHROME_DIST_DIR, archivePath);
+    success(`Created ${path.basename(archivePath)}`);
+    return archivePath;
+}
+
+async function createFirefoxXpi(firefoxManifest) {
+    const version = getVersion(firefoxManifest);
+    const archivePath = path.join(EXTENSION_DIR, `solokeys-vault-firefox-v${version}.xpi`);
+    log('\n🦊 Creating Firefox XPI package...', 'cyan');
+    await createZipArchive(FIREFOX_DIST_DIR, archivePath);
+    success(`Created ${path.basename(archivePath)}`);
+    return archivePath;
+}
+
+function createCRX(chromeManifest) {
+    log('\n🔐 Creating Chrome CRX package...', 'cyan');
     log('Note: Creating .crx requires Chrome and a PEM key file', 'yellow');
-    
-    const manifestPath = path.join(EXTENSION_DIR, 'manifest.json');
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    const version = manifest.version;
-    const crxName = `solokeys-vault-v${version}.crx`;
-    const crxPath = path.join(EXTENSION_DIR, crxName);
-    
-    // Check if Chrome is available
+
+    const version = getVersion(chromeManifest);
+    const crxPath = path.join(EXTENSION_DIR, `solokeys-vault-chrome-v${version}.crx`);
     let chromePath;
-    const platform = process.platform;
-    
-    if (platform === 'darwin') {
+
+    if (process.platform === 'darwin') {
         chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-    } else if (platform === 'win32') {
+    } else if (process.platform === 'win32') {
         chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
     } else {
         chromePath = '/usr/bin/google-chrome';
     }
-    
+
     if (!fs.existsSync(chromePath)) {
         warn(`Chrome not found at ${chromePath}`);
         warn('Cannot create .crx file automatically');
-        warn('To create .crx manually:');
-        warn('  1. Open Chrome and go to chrome://extensions/');
-        warn('  2. Enable "Developer mode"');
-        warn('  3. Click "Pack extension"');
-        warn('  4. Select the dist/ folder');
         return null;
     }
-    
-    // Check for PEM key
+
     const pemPath = path.join(EXTENSION_DIR, 'key.pem');
     const hasPEM = fs.existsSync(pemPath);
-    
+
     if (!hasPEM) {
         warn('No key.pem file found');
-        warn('A new key will be generated. Keep key.pem safe for future updates!');
+        warn('A new key will be generated. Keep key.pem safe for future updates.');
     }
-    
+
     try {
-        const cmd = hasPEM 
-            ? `"${chromePath}" --pack-extension="${DIST_DIR}" --pack-extension-key="${pemPath}"`
-            : `"${chromePath}" --pack-extension="${DIST_DIR}"`;
-        
-        execSync(cmd, { stdio: 'inherit' });
-        
-        // Chrome creates dist.crx in the parent directory
+        const command = hasPEM
+            ? `"${chromePath}" --pack-extension="${CHROME_DIST_DIR}" --pack-extension-key="${pemPath}"`
+            : `"${chromePath}" --pack-extension="${CHROME_DIST_DIR}"`;
+        execSync(command, { stdio: 'inherit' });
+
         const generatedCRX = path.join(EXTENSION_DIR, 'dist.crx');
         if (fs.existsSync(generatedCRX)) {
             fs.renameSync(generatedCRX, crxPath);
-            success(`Created ${crxName}`);
-            
-            if (!hasPEM) {
-                const generatedPEM = path.join(EXTENSION_DIR, 'dist.pem');
-                if (fs.existsSync(generatedPEM)) {
-                    fs.renameSync(generatedPEM, pemPath);
-                    success('Generated key.pem - KEEP THIS FILE SAFE!');
-                }
+            success(`Created ${path.basename(crxPath)}`);
+        }
+
+        if (!hasPEM) {
+            const generatedPEM = path.join(EXTENSION_DIR, 'dist.pem');
+            if (fs.existsSync(generatedPEM)) {
+                fs.renameSync(generatedPEM, pemPath);
+                success('Generated key.pem - keep this file safe');
             }
         }
-        
+
         return crxPath;
-    } catch (e) {
-        error('Failed to create .crx file');
-        error(e.message);
+    } catch (err) {
+        error(`Failed to create .crx file: ${err.message}`);
         return null;
     }
 }
 
-// Generate installation instructions
-function generateInstructions(zipPath, crxPath) {
+function generateInstructions({ chromeManifest, chromeZipPath, firefoxXpiPath, crxPath }) {
     log('\n📝 Generating installation instructions...', 'cyan');
-    
-    const manifest = JSON.parse(fs.readFileSync(path.join(EXTENSION_DIR, 'manifest.json'), 'utf8'));
-    const version = manifest.version;
-    
-    const instructions = `# SoloKeys Vault Extension v${version}
 
-## Installation Methods
+    const version = getVersion(chromeManifest);
+    const instructions = `# SoloKeys Vault Extensions v${version}
 
-### Method 1: Chrome Web Store (Recommended for distribution)
+## Chrome / Chromium
 
-1. Upload \`${path.basename(zipPath)}\` to the Chrome Web Store Developer Dashboard
-2. Follow the Chrome Web Store publishing process
-3. Users can install directly from the store
+### Packaged install
 
-### Method 2: Developer Mode (Local Installation)
+1. Load \`${path.basename(chromeZipPath || 'solokeys-vault-chrome-vX.X.X.zip')}\` into the Chrome Web Store or unpack it locally.
+2. For local testing, open \`chrome://extensions/\`.
+3. Enable Developer mode.
+4. Click "Load unpacked" and select \`dist/\`.
 
-1. Open Chrome and navigate to \`chrome://extensions/\`
-2. Enable "Developer mode" in the top right corner
-3. Click "Load unpacked"
-4. Select the \`dist/\` folder from this directory
+### Manual CRX
 
-### Method 3: .crx File (Enterprise/Group Policy)
+${crxPath ? `- \`${path.basename(crxPath)}\` was built for manual Chromium installs.` : '- Use `node build.js --chrome --crx` to create a CRX package.'}
 
-1. Distribute the \`${path.basename(crxPath || 'solokeys-vault-vX.X.X.crx')}\` file to users
-2. Users can drag-and-drop the .crx file onto \`chrome://extensions/\`
-3. Or use Chrome Enterprise policies for automatic installation
+## Firefox Desktop
 
-## File Structure
+### Local testing
 
-\`\`\`
-dist/
-├── manifest.json
-├── background/
-│   └── service-worker.js
-├── popup/
-│   ├── popup.html
-│   └── popup.js
-├── options/
-│   ├── options.html
-│   └── options.js
-├── content/
-│   └── content.js
-├── lib/
-│   ├── ctaphid.js
-│   ├── native-transport.js
-│   └── utils.js
-├── icons/
-│   ├── icon.svg
-│   ├── new-logo-16.png
-│   ├── new-logo-48.png
-│   └── new-logo-128.png
-└── README.md
-\`\`\`
+1. Open \`about:debugging#/runtime/this-firefox\`.
+2. Click "Load Temporary Add-on".
+3. Select \`dist-firefox/manifest.json\`.
 
-## Extension ID
+### XPI artifact
 
-The extension ID is generated from the public key in key.pem.
-To view the extension ID after installation:
-1. Go to chrome://extensions/
-2. Find "SoloKeys Vault"
-3. The ID is shown below the extension name
+- \`${path.basename(firefoxXpiPath || 'solokeys-vault-firefox-vX.X.X.xpi')}\` is generated for Firefox packaging/signing workflows.
+- Release Firefox installs require signing in normal Firefox builds.
+- Use \`WEB_EXT_API_KEY=... WEB_EXT_API_SECRET=... npm run sign:firefox\` to download a signed self-distribution XPI.
 
-## Permissions Required
+## Native Messaging
 
-- \`hid\`: For USB HID communication with SoloKeys device
-- \`storage\`: For extension settings
-- \`activeTab\`: For detecting OTP input fields
-- \`scripting\`: For content script injection
-- \`notifications\`: For touch reminders
+- Chrome/Chromium uses the native host manifest with \`allowed_origins\`.
+- Firefox uses the native host manifest with \`allowed_extensions\` and the extension ID \`${FIREFOX_EXTENSION_ID}\`.
 
-## Version History
+## Output Directories
 
-### v${version}
-- Initial release
-- TOTP generation via SoloKeys 2
-- QR code scanning for credential setup
-- Site detection and auto-fill
-- PIN and touch protection support
-
-## Support
-
-For issues or questions, please refer to the README.md file.
+- \`dist/\` → Chrome build
+- \`dist-firefox/\` → Firefox build
 `;
-    
+
     const instructionsPath = path.join(EXTENSION_DIR, `INSTALL-v${version}.md`);
-    fs.writeFileSync(instructionsPath, instructions);
+    fs.writeFileSync(instructionsPath, instructions, 'utf8');
     success(`Created ${path.basename(instructionsPath)}`);
 }
 
-// Main build process
 async function build() {
-    log('\n🔨 Building SoloKeys Vault Extension...', 'magenta');
-    log('=' .repeat(50), 'magenta');
-    
-    // Validate first
+    log('\n🔨 Building SoloKeys Vault browser extensions...', 'magenta');
+    log('='.repeat(60), 'magenta');
+
     validateExtension();
-    
+
     if (shouldValidateOnly) {
         return;
     }
-    
-    // Clean and prepare
+
     if (shouldClean) {
-        cleanDist();
+        cleanBuildDirs();
         return;
     }
-    
-    cleanDist();
-    copyExtensionFiles();
-    
-    let zipPath = null;
+
+    const chromeManifest = readBaseManifest();
+    const firefoxManifest = createFirefoxManifest(chromeManifest);
+
+    cleanBuildDirs();
+
+    if (buildChrome) {
+        log('\n📦 Preparing Chrome build directory...', 'cyan');
+        prepareDistDir(CHROME_DIST_DIR, chromeManifest);
+        success('Prepared dist/');
+    }
+
+    if (buildFirefox) {
+        log('\n📦 Preparing Firefox build directory...', 'cyan');
+        prepareDistDir(FIREFOX_DIST_DIR, firefoxManifest);
+        success('Prepared dist-firefox/');
+    }
+
+    let chromeZipPath = null;
+    let firefoxXpiPath = null;
     let crxPath = null;
-    
-    // Create packages
-    if (shouldCreateZIP) {
-        try {
-            zipPath = await createZIP();
-        } catch (e) {
-            error('Failed to create ZIP: ' + e.message);
+
+    if (buildChrome) {
+        chromeZipPath = await createChromeZip(chromeManifest);
+    }
+
+    if (buildFirefox) {
+        firefoxXpiPath = await createFirefoxXpi(firefoxManifest);
+    }
+
+    if (buildChrome && shouldCreateCRX) {
+        crxPath = createCRX(chromeManifest);
+    }
+
+    generateInstructions({ chromeManifest, chromeZipPath, firefoxXpiPath, crxPath });
+
+    log('\n' + '='.repeat(60), 'magenta');
+    success('Build complete');
+    log('\nOutput files:', 'cyan');
+
+    if (buildChrome) {
+        log(`  📁 dist/ - Chrome unpacked extension`, 'green');
+        if (chromeZipPath && fs.existsSync(chromeZipPath)) {
+            const size = (fs.statSync(chromeZipPath).size / 1024).toFixed(2);
+            log(`  📦 ${path.basename(chromeZipPath)} (${size} KB)`, 'green');
         }
     }
-    
-    if (shouldCreateCRX) {
-        crxPath = createCRX();
+
+    if (buildFirefox) {
+        log(`  📁 dist-firefox/ - Firefox unpacked extension`, 'green');
+        if (firefoxXpiPath && fs.existsSync(firefoxXpiPath)) {
+            const size = (fs.statSync(firefoxXpiPath).size / 1024).toFixed(2);
+            log(`  🦊 ${path.basename(firefoxXpiPath)} (${size} KB)`, 'green');
+        }
     }
-    
-    // Generate instructions
-    generateInstructions(zipPath, crxPath);
-    
-    // Summary
-    log('\n' + '='.repeat(50), 'magenta');
-    success('Build complete!');
-    log('\nOutput files:', 'cyan');
-    
-    if (zipPath && fs.existsSync(zipPath)) {
-        const size = (fs.statSync(zipPath).size / 1024).toFixed(2);
-        log(`  📦 ${path.basename(zipPath)} (${size} KB) - Chrome Web Store`, 'green');
-    }
-    
+
     if (crxPath && fs.existsSync(crxPath)) {
         const size = (fs.statSync(crxPath).size / 1024).toFixed(2);
-        log(`  🔐 ${path.basename(crxPath)} (${size} KB) - Manual install`, 'green');
+        log(`  🔐 ${path.basename(crxPath)} (${size} KB)`, 'green');
     }
-    
-    log(`  📁 dist/ - Unpacked extension`, 'green');
-    
+
     log('\nNext steps:', 'cyan');
-    if (shouldCreateZIP) {
-        log('  1. Upload the ZIP to Chrome Web Store, OR', 'blue');
+    let stepNumber = 1;
+    if (buildChrome) {
+        log(`  ${stepNumber}. Load dist/ in Chrome or upload the Chrome ZIP to the Chrome Web Store`, 'blue');
+        stepNumber += 1;
     }
-    log('  2. Load the dist/ folder in Chrome developer mode', 'blue');
+    if (buildFirefox) {
+        log(`  ${stepNumber}. Load dist-firefox/ temporarily in Firefox or sign the XPI for release use`, 'blue');
+        stepNumber += 1;
+    }
     if (crxPath) {
-        log('  3. Distribute the .crx file for manual installation', 'blue');
+        log(`  ${stepNumber}. Distribute the CRX only for Chromium manual installs`, 'blue');
+        stepNumber += 1;
     }
-    log('\nSee INSTALL-*.md for detailed instructions.', 'blue');
+    log(`  ${stepNumber}. See INSTALL-*.md for install notes`, 'blue');
 }
 
-// Run build
-build().catch(err => {
-    error('Build failed: ' + err.message);
+build().catch((err) => {
+    error(`Build failed: ${err.message}`);
     console.error(err);
     process.exit(1);
 });

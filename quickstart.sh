@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # quickstart.sh - Quick start script for developers
-# Builds and loads the extension into Chrome automatically
+# Builds the extension packages and prints browser-specific load steps
 #
 
 set -e
@@ -31,7 +31,7 @@ echo ""
 echo "🔨 Building extension..."
 node build.js
 
-if [ ! -d "dist" ]; then
+if [ ! -d "dist" ] || [ ! -d "dist-firefox" ]; then
     echo "❌ Build failed"
     exit 1
 fi
@@ -40,33 +40,21 @@ echo ""
 echo "✅ Extension built successfully!"
 echo ""
 
-# Show Chrome paths by platform
 echo "Next steps:"
 echo "-----------"
 echo ""
-echo "1. Open Chrome and navigate to: chrome://extensions/"
+echo "Chrome / Chromium:"
+echo "  1. Open chrome://extensions/"
+echo "  2. Enable 'Developer mode'"
+echo "  3. Click 'Load unpacked' and select:"
+echo "     $(pwd)/dist"
 echo ""
-echo "2. Enable 'Developer mode' (toggle in top-right)"
+echo "Firefox:"
+echo "  1. Open about:debugging#/runtime/this-firefox"
+echo "  2. Click 'Load Temporary Add-on'"
+echo "  3. Select:"
+echo "     $(pwd)/dist-firefox/manifest.json"
 echo ""
-echo "3. Click 'Load unpacked' and select:"
-echo "   $(pwd)/dist"
-echo ""
-
-# Try to open Chrome automatically
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS
-    if command -v open &> /dev/null; then
-        echo "Opening Chrome..."
-        open -a "Google Chrome" "chrome://extensions/" 2>/dev/null || \
-        open "chrome://extensions/" 2>/dev/null || true
-    fi
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    # Linux
-    if command -v xdg-open &> /dev/null; then
-        echo "Opening Chrome..."
-        xdg-open "chrome://extensions/" 2>/dev/null || true
-    fi
-fi
 
 echo ""
 echo "📚 For more options, run: make help"

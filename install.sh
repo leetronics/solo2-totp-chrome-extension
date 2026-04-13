@@ -1,11 +1,12 @@
 #!/bin/bash
 #
-# install.sh - Automated installation script for SoloKeys Vault Extension
+# install.sh - Automated installation helper for SoloKeys Vault
 #
 # Usage:
-#   ./install.sh           - Install to Chrome (macOS/Linux)
-#   ./install.sh --chrome  - Specify Chrome path
-#   ./install.sh --clean   - Clean and reinstall
+#   ./install.sh             - Build and print Chrome + Firefox install steps
+#   ./install.sh --chrome    - Build and print Chrome install steps only
+#   ./install.sh --firefox   - Build and print Firefox install steps only
+#   ./install.sh --clean     - Clean first, then rebuild requested targets
 #
 
 set -e
@@ -19,43 +20,44 @@ NC='\033[0m' # No Color
 
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DIST_DIR="$SCRIPT_DIR/dist"
+CHROME_DIST_DIR="$SCRIPT_DIR/dist"
+FIREFOX_DIST_DIR="$SCRIPT_DIR/dist-firefox"
+TARGET="all"
+CLEAN=0
 
 echo -e "${BLUE}SoloKeys Vault Extension Installer${NC}"
 echo "=================================="
 echo ""
 
-# Check if dist directory exists
-if [ ! -d "$DIST_DIR" ]; then
-    echo -e "${YELLOW}Extension not built yet. Building now...${NC}"
-    
-    # Check if node is available
-    if ! command -v node &> /dev/null; then
-        echo -e "${RED}Error: Node.js is required but not installed.${NC}"
-        echo "Please install Node.js or manually build the extension."
-        exit 1
-    fi
-    
-    # Build the extension
-    node "$SCRIPT_DIR/build.js"
-    
-    if [ ! -d "$DIST_DIR" ]; then
-        echo -e "${RED}Error: Build failed. dist/ directory not created.${NC}"
-        exit 1
-    fi
-fi
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --chrome)
+            TARGET="chrome"
+            ;;
+        --firefox)
+            TARGET="firefox"
+            ;;
+        --clean)
+            CLEAN=1
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            echo "Usage: ./install.sh [--chrome] [--firefox] [--clean]"
+            exit 1
+            ;;
+    esac
+    shift
+done
 
-# Detect Chrome path
 detect_chrome() {
+    CHROME_PATH=""
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS
         if [ -d "/Applications/Google Chrome.app" ]; then
             CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         elif [ -d "/Applications/Chromium.app" ]; then
             CHROME_PATH="/Applications/Chromium.app/Contents/MacOS/Chromium"
         fi
     elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        # Linux
         if command -v google-chrome &> /dev/null; then
             CHROME_PATH="google-chrome"
         elif command -v chromium-browser &> /dev/null; then
@@ -64,116 +66,150 @@ detect_chrome() {
             CHROME_PATH="chromium"
         fi
     fi
-    
-    # Allow override from environment or argument
     if [ -n "$CHROME_BIN" ]; then
         CHROME_PATH="$CHROME_BIN"
     fi
 }
 
-detect_chrome
-
-if [ -z "$CHROME_PATH" ]; then
-    echo -e "${YELLOW}Could not auto-detect Chrome installation.${NC}"
-    echo "Please specify Chrome path with: CHROME_BIN=/path/to/chrome ./install.sh"
-    echo ""
-    echo "Opening manual installation instructions..."
-    
-    cat << 'EOF'
-
-Manual Installation Instructions:
-================================
-
-1. Open Chrome and navigate to: chrome://extensions/
-
-2. Enable "Developer mode" in the top-right corner
-
-3. Click "Load unpacked"
-
-4. Select the dist/ folder from this directory:
-   
-EOF
-    echo "   $DIST_DIR"
-    echo ""
-    
-    # Try to open Chrome extensions page
+detect_firefox() {
+    FIREFOX_PATH=""
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        open "chrome://extensions/" 2>/dev/null || true
+        if [ -d "/Applications/Firefox.app" ]; then
+            FIREFOX_PATH="/Applications/Firefox.app/Contents/MacOS/firefox"
+        fi
     elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        xdg-open "chrome://extensions/" 2>/dev/null || true
+        if command -v firefox &> /dev/null; then
+            FIREFOX_PATH="firefox"
+        fi
     fi
-    
-    exit 0
-fi
 
-echo -e "${GREEN}Found Chrome at: $CHROME_PATH${NC}"
-echo ""
-
-# Check if extension is already installed
-EXTENSION_NAME="SoloKeys Vault"
-
-# Function to open Chrome with extensions page
-open_chrome_extensions() {
-    echo -e "${BLUE}Opening Chrome Extensions page...${NC}"
-    
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS - use open command
-        open -a "Google Chrome" "chrome://extensions/" 2>/dev/null || \
-        open -a "Chromium" "chrome://extensions/" 2>/dev/null || \
-        "$CHROME_PATH" "chrome://extensions/" &
-    else
-        # Linux
-        "$CHROME_PATH" "chrome://extensions/" &
+    if [ -n "$FIREFOX_BIN" ]; then
+        FIREFOX_PATH="$FIREFOX_BIN"
     fi
 }
 
-echo -e "${GREEN}✓ Extension is ready to install!${NC}"
+build_extension() {
+    if ! command -v node &> /dev/null; then
+        echo -e "${RED}Error: Node.js is required but not installed.${NC}"
+        echo "Please install Node.js or manually build the extension."
+        exit 1
+    fi
+
+    if [ "$CLEAN" -eq 1 ]; then
+        node "$SCRIPT_DIR/build.js" --clean
+    fi
+
+    case "$TARGET" in
+        chrome)
+            node "$SCRIPT_DIR/build.js" --chrome
+            ;;
+        firefox)
+            node "$SCRIPT_DIR/build.js" --firefox
+            ;;
+        *)
+            node "$SCRIPT_DIR/build.js"
+            ;;
+    esac
+}
+
+open_chrome_extensions() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        if ! open -a "Google Chrome" "chrome://extensions/" 2>/dev/null; then
+            if ! open -a "Chromium" "chrome://extensions/" 2>/dev/null; then
+                if [ -n "$CHROME_PATH" ]; then
+                    "$CHROME_PATH" "chrome://extensions/" &
+                fi
+            fi
+        fi
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        if [ -n "$CHROME_PATH" ]; then
+            "$CHROME_PATH" "chrome://extensions/" &
+        fi
+    fi
+}
+
+open_firefox_debugging() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        if ! open -a "Firefox" "about:debugging#/runtime/this-firefox" 2>/dev/null; then
+            if [ -n "$FIREFOX_PATH" ]; then
+                "$FIREFOX_PATH" "about:debugging#/runtime/this-firefox" &
+            fi
+        fi
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        if [ -n "$FIREFOX_PATH" ]; then
+            "$FIREFOX_PATH" "about:debugging#/runtime/this-firefox" &
+        fi
+    fi
+}
+
+build_extension
+detect_chrome
+detect_firefox
+
+if [ "$TARGET" != "firefox" ] && [ ! -d "$CHROME_DIST_DIR" ]; then
+    echo -e "${RED}Error: Chrome build output not found at $CHROME_DIST_DIR${NC}"
+    exit 1
+fi
+
+if [ "$TARGET" != "chrome" ] && [ ! -d "$FIREFOX_DIST_DIR" ]; then
+    echo -e "${RED}Error: Firefox build output not found at $FIREFOX_DIST_DIR${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Extension build is ready to install.${NC}"
 echo ""
-echo "Extension location: $DIST_DIR"
-echo ""
 
-# Provide instructions
-cat << EOF
-Installation Options:
-====================
-
-Option 1 - Chrome Web Store (Recommended for users):
-  1. Upload solokeys-vault-*.zip to Chrome Web Store
-  2. Publish and distribute the extension ID
-
-Option 2 - Developer Mode (For testing/development):
+if [ "$TARGET" != "firefox" ]; then
+    cat << EOF
+Chrome / Chromium:
+==================
+Developer mode:
   1. Open Chrome: chrome://extensions/
   2. Enable "Developer mode"
   3. Click "Load unpacked"
-  4. Select: $DIST_DIR
+  4. Select: $CHROME_DIST_DIR
 
-Option 3 - Drag and Drop (Quick install):
-  1. Open Chrome: chrome://extensions/
-  2. Enable "Developer mode"
-  3. Drag solokeys-vault-*.crx onto the page
-
-Option 4 - Enterprise/Policy:
-  Use the generated .crx file with Chrome Enterprise policies
+Release / distribution:
+  - Upload solokeys-vault-chrome-v*.zip to the Chrome Web Store
+  - Or drag solokeys-vault-chrome-v*.crx onto chrome://extensions/
 
 EOF
-
-# Offer to open Chrome
-read -p "Open Chrome Extensions page now? (y/n): " -n 1 -r
-echo ""
-
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    open_chrome_extensions
-    echo -e "${GREEN}Chrome should open shortly.${NC}"
-    echo ""
-    echo "Next steps:"
-    echo "  1. Enable 'Developer mode' in Chrome"
-    echo "  2. Click 'Load unpacked'"
-    echo "  3. Select the dist/ folder"
 fi
 
-echo ""
-echo -e "${GREEN}Installation preparation complete!${NC}"
-echo ""
-echo "For more information, see:"
-echo "  - README.md"
-echo "  - INSTALL-*.md (generated after build)"
+if [ "$TARGET" != "chrome" ]; then
+    cat << EOF
+Firefox:
+========
+Local testing:
+  1. Open Firefox: about:debugging#/runtime/this-firefox
+  2. Click "Load Temporary Add-on"
+  3. Select: $FIREFOX_DIST_DIR/manifest.json
+
+Release / distribution:
+  - Sign solokeys-vault-firefox-v*.xpi for release use
+
+EOF
+fi
+
+if [ "$TARGET" = "chrome" ] || [ "$TARGET" = "all" ]; then
+    if [ -n "$CHROME_PATH" ]; then
+        read -p "Open Chrome extensions page now? (y/n): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            open_chrome_extensions
+        fi
+    fi
+fi
+
+if [ "$TARGET" = "firefox" ] || [ "$TARGET" = "all" ]; then
+    if [ -n "$FIREFOX_PATH" ]; then
+        read -p "Open Firefox add-on debugging page now? (y/n): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            open_firefox_debugging
+        fi
+    fi
+fi
+
+echo -e "${GREEN}Installation preparation complete.${NC}"
+echo "See README.md and the generated INSTALL-*.md for packaging details."
