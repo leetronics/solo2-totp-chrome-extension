@@ -81,6 +81,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
+    env:
+      WEB_EXT_API_KEY: ${{ secrets.FIREFOX_AMO_API_KEY }}
+      WEB_EXT_API_SECRET: ${{ secrets.FIREFOX_AMO_API_SECRET }}
 
     steps:
       - name: Checkout repository
@@ -98,10 +101,7 @@ jobs:
         run: npm run build:zip
 
       - name: Sign Firefox package
-        if: ${{ secrets.FIREFOX_AMO_API_KEY != '' && secrets.FIREFOX_AMO_API_SECRET != '' }}
-        env:
-          WEB_EXT_API_KEY: ${{ secrets.FIREFOX_AMO_API_KEY }}
-          WEB_EXT_API_SECRET: ${{ secrets.FIREFOX_AMO_API_SECRET }}
+        if: ${{ env.WEB_EXT_API_KEY != '' && env.WEB_EXT_API_SECRET != '' }}
         run: npm run sign:firefox
 
       - name: Publish GitHub release
